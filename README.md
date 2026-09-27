@@ -20,6 +20,7 @@ Core design principle:
 
 - Private chat
 - Group chat
+- User avatar uploads
 - Realtime message delivery
 - Message persistence in MySQL
 - Message ordering
@@ -62,6 +63,19 @@ mqtt_chat/
 │   ├── models.py
 │   ├── tests.py
 │   ├── views.py
+│   ├── repositories/
+│   │   ├── user_repository.py
+│   │   ├── invitation_repository.py
+│   │   ├── friendship_repository.py
+│   │   ├── conversation_repository.py
+│   │   └── message_repository.py
+│   ├── services/
+│   │   ├── chat_service.py
+│   │   ├── user_service.py
+│   │   ├── conversation_service.py
+│   │   ├── message_service.py
+│   │   └── errors.py
+│   ├── mqtt_messages.py
 │   └── migrations/
 └── README.md
 ```
@@ -144,6 +158,33 @@ Open:
 http://127.0.0.1:8000/
 ```
 
+## User Avatars
+
+Upload an avatar using `POST /api/users/{user_id}/avatar/` with a multipart
+form field named `avatar`. JPEG, PNG, GIF, BMP, and WebP files up to 5 MB are
+accepted. Use `DELETE` on the same endpoint to remove the avatar. User API
+responses include `avatar_url`, which is `null` when no avatar is set. In
+development, uploaded files are served from `/media/`; configure media storage
+and serving separately for production.
+
+## User Profiles and Conversations
+
+Create users with `username` and optional `status` (`online` or `offline`),
+`short_bio` (up to 160 characters), `bio`, and `sex` (`female` or `male`).
+New users default to `offline`; `PATCH /api/users/{user_id}/` accepts any
+subset of these fields.
+
+Create or reuse a private conversation with
+`POST /api/conversations/` and JSON `{"user_id":"...","type":"PRIVATE","username":"peer"}`.
+Create a group with `{"user_id":"...","type":"GROUP","name":"Team","usernames":["peer1","peer2"]}`;
+the creator is added as a member automatically. Usernames must exist, and a
+private conversation is reused only when its exact two members match.
+
+Load messages with
+`GET /api/conversations/{conversation_id}/messages/?user_id={user_id}`.
+Only conversation members can read history. `limit` defaults to 50 and is
+capped at 100; `before_seq` returns messages preceding that sequence number.
+
 ## MQTT Broker Setup
 
 A Mosquitto broker should be running for the realtime message layer.
@@ -153,6 +194,19 @@ Example broker connection:
 - Host: `127.0.0.1`
 - Port: `1883`
 
+Start the Django presence subscriber with:
+
+```bash
+python manage.py run_mqtt_presence
+```
+
+It reads `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME`, and `MQTT_PASSWORD` from
+the environment (host and port default to `127.0.0.1:1883`) and subscribes to
+`chat/users/+/status`. MQTT clients publish the literal payload `online` or
+`offline` to `chat/users/{user_id}/status` at QoS 1. Set a retained `offline`
+Last Will on that topic before connecting, and publish retained `online` after
+connecting, so unexpected disconnects also update the database.
+
 The system design expects a broker topic model similar to:
 
 ```text
@@ -161,16 +215,45 @@ chat/client/{user_id}/command/sync
 chat/client/{user_id}/command/delivered
 ```
 
+Run the message worker in a separate terminal from Django's web server:
+
+```bash
+python manage.py run_mqtt_worker
+```
+
+It subscribes to `chat/client/+/command/send`. Publish a JSON object to
+`chat/client/{user_id}/command/send`, where `{user_id}` is the sender UUID:
+
+```json
+{
+  "conversation_id": "conversation-uuid",
+  "client_message_id": "client-generated-uuid",
+  "content": "Hello",
+  "reply_to_message_id": null
+}
+```
+
+Do not include `seq`: the worker allocates it while locking the conversation
+row inside a database transaction. This serializes sends in one conversation
+without blocking sends to other conversations. The database also enforces
+unique `(conversation, seq)` and `(sender, client_message_id)` constraints.
+Retries with the same client ID and unchanged message content return the
+original sequence as a duplicate acknowledgment; reusing that ID for different
+message data returns an error.
+
+The sender receives `MESSAGE_ACCEPTED` on
+`chat/client/{user_id}/event/message_accepted`, or `ERROR` on
+`chat/client/{user_id}/event/error`. New messages are broadcast after database
+commit on `chat/conversations/{conversation_id}/event/message_created`.
+Configure Mosquitto authentication and ACLs so a client can publish commands
+only under its own user ID and subscribe only to authorized event topics.
+
 ## Recommended Next Steps
 
-The project is currently in the scaffolding / planning stage. The next implementation milestones normally include:
+Remaining messaging milestones include:
 
-1. Define user and conversation models in `chat/models.py`
-2. Add repository and service layers for chat logic
-3. Implement MQTT worker commands
-4. Add message persistence and sync logic
-5. Build client communication for sending and receiving realtime messages
-6. Add tests for message ordering, deduplication, and receipts
+1. Add delivery/read receipt and offline synchronization APIs.
+2. Build client communication for sending and receiving realtime messages.
 
 ## Notes
 
