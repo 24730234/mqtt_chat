@@ -254,7 +254,8 @@ FE được triển khai trong `frontend/` bằng **React + Vite + MQTT.js**, đ
 `chat/views.py`, `config/urls.py` và `chat/mqtt_messages.py` tại BE commit `7dc68e8`.
 
 **Trạng thái:** đã có giao diện và adapter cho API/MQTT hiện có; đã build và kiểm thử
-FE riêng. **Chưa nghiệm thu end-to-end với Django + MySQL + Mosquitto của nhóm**.
+FE riêng. **Ngày 01/10 đã kiểm tra với Django + MySQL + Mosquitto local và cả hai worker thật**;
+môi trường triển khai/ACL của nhóm vẫn cần nghiệm thu riêng.
 Không coi chức năng trong danh sách Features phía trên là đã hoàn thành toàn bộ.
 
 ### Đã làm được
@@ -298,6 +299,15 @@ Không coi chức năng trong danh sách Features phía trên là đã hoàn th�
 - Giữ nguyên HTTP status khi server trả JSON `null` cho lỗi, để giao diện vẫn xử lý được 403/404.
 - Kiểm tra lại: **18/18 tests qua**, `npm run build` thành công; tìm `thien_fixture`, mở hội thoại mẫu và gửi tin nhận ACK trên trình duyệt.
 - Chưa nghiệm thu với backend thật của nhóm. Các mục còn chờ BE được liệt kê ở checklist integrate bên dưới.
+
+### Tích hợp backend thật ngày 01/10/2026
+
+- Đã chạy `run_mqtt_worker` và `run_mqtt_presence` trong hai container riêng cùng Django, MySQL 8.4 và Mosquitto 2; log xác nhận subscribe đúng topic.
+- Đã qua **8 nhóm kiểm tra tích hợp thật**: user/nhóm, presence online/offline lưu DB, ACK và broadcast, retry chống trùng, history 50 + 5 tin/reply, quyền history 403, hồ sơ và upload/GET/xóa avatar.
+- Đã gửi tin trực tiếp từ FE qua broker thật và nhận xác nhận lưu MySQL; **18/18 unit tests FE + build** vẫn qua.
+- FE: `http://127.0.0.1:5173/?mode=live`, API base `/api`, MQTT `ws://127.0.0.1:9001`. User sau chạy smoke: `quang_live`, `thien_live`.
+- Cấu hình và hướng dẫn khởi động cả stack: [integration/README.md](integration/README.md). Không cần fixture cho luồng này.
+- Broker local chỉ mở cổng trên loopback, dùng anonymous cho phát triển. Chưa kiểm chứng ACL production, Last Will khi client chết đột ngột hoặc full offline sync.
 
 ### Cách chạy FE
 

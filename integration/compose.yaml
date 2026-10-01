@@ -1,0 +1,77 @@
+name: mqtt-chat-integration
+x-backend: &backend
+  image: mqtt-chat-backend:local
+  build:
+    context: ..
+    dockerfile: integration/Dockerfile
+  working_dir: /app
+  environment: &backend-env
+    DJANGO_SETTINGS_MODULE: integration.settings
+    MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set integration/.env}
+    MQTT_HOST: broker
+    MQTT_PORT: "1883"
+  volumes:
+    - ../:/app:ro
+    - media:/media
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: mqtt_chat
+      MYSQL_USER: mqtt_chat
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set integration/.env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set integration/.env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --protocol=tcp --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  broker:
+    image: eclipse-mosquitto:2
+    ports:
+      - "127.0.0.1:1883:1883"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "127.0.0.1", "-t", "healthcheck", "-m", "ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    <<: *backend
+    command: python manage.py migrate --noinput
+    depends_on:
+      db:
+        condition: service_healthy
+  web:
+    <<: *backend
+    command: python manage.py runserver 0.0.0.0:8000 --noreload
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  message-worker:
+    <<: *backend
+    command: python manage.py run_mqtt_worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      broker:
+        condition: service_healthy
+  presence-worker:
+    <<: *backend
+    command: python manage.py run_mqtt_presence
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      broker:
+        condition: service_healthy
+volumes:
+  mysql-data:
+  mqtt-data:
+  media:

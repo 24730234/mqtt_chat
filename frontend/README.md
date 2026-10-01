@@ -66,7 +66,8 @@ npm run build
 Đã qua 18 unit/contract tests và build. Đã kiểm tra trình duyệt với fixture: profile PATCH,
 tạo nhóm, mở history có 55 tin, tải 50 + 5, reply, ACK, refresh không trùng và hai phiên user realtime.
 Avatar có test validation/multipart; vẫn cần kiểm tra upload/delete storage thật với Django.
-Chưa có kiểm thử end-to-end với MySQL + Mosquitto + Django của nhóm trên máy này.
+Ngày 01/10 đã chạy thêm 8 nhóm kiểm thử với MySQL + Mosquitto + Django local và cả hai worker thật.
+Xem [hướng dẫn tích hợp thật](../integration/README.md). Môi trường triển khai/ACL của nhóm vẫn cần kiểm tra riêng.
 
 ### Fixture cô lập để kiểm tra FE
 
@@ -96,3 +97,10 @@ kèm **Hoàn tác**. Không có yêu cầu DELETE hội thoại được gửi t
 Rà soát bàn giao 30/09: khôi phục MQTT sau khi bỏ topic bị từ chối, bỏ qua callback
 subscribe cũ sau disconnect và giữ timeout nếu ACK thuộc hội thoại khác. API lỗi có
 JSON `null` vẫn giữ HTTP status. Các trường hợp này đã có regression tests.
+
+## Chạy với backend thật (01/10/2026)
+
+Khởi động stack theo [integration/README.md](../integration/README.md), dùng API base
+`/api` và MQTT `ws://127.0.0.1:9001`. Sau chạy `node integration/smoke.mjs` từ thư mục gốc,
+có thể chọn `quang_live` hoặc `thien_live`. Hai worker được chạy riêng và giữ hoạt động
+trong Docker. Không bấm **Dùng server test** khi muốn kiểm tra stack này.
