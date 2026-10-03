@@ -1,6 +1,6 @@
 # Mạch — MQTT Chat Frontend
 
-React + Vite + MQTT.js. Giao diện tiếng Việt, chế độ demo độc lập và chế độ kết nối API/MQTT theo BE commit `7dc68e8`.
+React + Vite + MQTT.js. Giao diện tiếng Việt, chế độ demo độc lập và chế độ kết nối API/MQTT theo BE commit `78f0fe7`.
 
 ## Chạy
 
@@ -66,7 +66,8 @@ npm run build
 Đã qua 18 unit/contract tests và build. Đã kiểm tra trình duyệt với fixture: profile PATCH,
 tạo nhóm, mở history có 55 tin, tải 50 + 5, reply, ACK, refresh không trùng và hai phiên user realtime.
 Avatar có test validation/multipart; vẫn cần kiểm tra upload/delete storage thật với Django.
-Ngày 01/10 đã chạy thêm 8 nhóm kiểm thử với MySQL + Mosquitto + Django local và cả hai worker thật.
+Ngày 03/10 đã chạy 9 nhóm kiểm thử với MySQL + Mosquitto + Django local và cả hai worker thật,
+bao gồm endpoint tìm kiếm tin nhắn mới; không dùng Docker.
 Xem [hướng dẫn tích hợp thật](../integration/README.md). Môi trường triển khai/ACL của nhóm vẫn cần kiểm tra riêng.
 
 ### Fixture cô lập để kiểm tra FE
@@ -98,9 +99,9 @@ Rà soát bàn giao 30/09: khôi phục MQTT sau khi bỏ topic bị từ chối
 subscribe cũ sau disconnect và giữ timeout nếu ACK thuộc hội thoại khác. API lỗi có
 JSON `null` vẫn giữ HTTP status. Các trường hợp này đã có regression tests.
 
-## Chạy với backend thật (01/10/2026)
+## Chạy với backend thật không dùng Docker (03/10/2026)
 
 Khởi động stack theo [integration/README.md](../integration/README.md), dùng API base
 `/api` và MQTT `ws://127.0.0.1:9001`. Sau chạy `node integration/smoke.mjs` từ thư mục gốc,
-có thể chọn `quang_live` hoặc `thien_live`. Hai worker được chạy riêng và giữ hoạt động
-trong Docker. Không bấm **Dùng server test** khi muốn kiểm tra stack này.
+có thể chọn `quang_live` hoặc `thien_live`. Django, Mosquitto và hai worker được chạy
+thành các process local riêng. Không bấm **Dùng server test** khi muốn kiểm tra stack này.

@@ -61,6 +61,10 @@ try {
   assert.equal(new Set(all.map(m => m.message_id)).size, 55);
   assert.equal(all.find(m => m.message_id === reply.ack.message_id).reply_to.message_id, first.ack.message_id);
   pass('MySQL-backed HTTP history: 50 + 5 messages, ordered seq, reply and no duplicate');
+  const found = await api.searchMessages(c.conversation_id, alice.user_id, 'phân trang 5');
+  assert.ok(found.messages.length > 0);
+  assert.ok(found.messages.every(m => m.content.toLocaleLowerCase('vi').includes('phân trang 5')));
+  pass('Server-side message search returns matching conversation messages');
   await assert.rejects(api.history(c.conversation_id, outsider.user_id), e => e.status === 403);
   pass('History denies non-members with HTTP 403');
   const profile = await api.updateUser(alice.user_id, { short_bio: 'Đã kiểm tra với Django + MySQL + Mosquitto thật' });
