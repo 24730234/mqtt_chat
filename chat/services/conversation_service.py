@@ -95,6 +95,35 @@ class ConversationService:
             )
 
     def load_history(self, conversation_id, user_id, before_seq=None, limit=50):
+        conversation = self._get_member_conversation(conversation_id, user_id)
+        before_seq, limit = self._pagination_values(before_seq, limit)
+        messages = list(
+            self.conversations.messages(
+                conversation,
+                before_seq=before_seq,
+                limit=limit,
+            )
+        )
+        return conversation, list(reversed(messages))
+
+    def search_messages(
+        self, conversation_id, user_id, query, before_seq=None, limit=50
+    ):
+        if not isinstance(query, str) or not query.strip():
+            raise ServiceError("q must be a non-empty string")
+        conversation = self._get_member_conversation(conversation_id, user_id)
+        before_seq, limit = self._pagination_values(before_seq, limit)
+        messages = list(
+            self.conversations.search_messages(
+                conversation,
+                query.strip(),
+                before_seq=before_seq,
+                limit=limit,
+            )
+        )
+        return conversation, list(reversed(messages))
+
+    def _get_member_conversation(self, conversation_id, user_id):
         parsed_conversation_id = self._parse_id(conversation_id)
         conversation = (
             self.conversations.get(parsed_conversation_id)
@@ -106,7 +135,10 @@ class ConversationService:
         user = self._get_user(user_id)
         if not self.conversations.is_member(conversation, user):
             raise PermissionError("user is not a member of this conversation")
+        return conversation
 
+    @classmethod
+    def _pagination_values(cls, before_seq, limit):
         if before_seq is not None:
             try:
                 before_seq = int(before_seq)
@@ -120,12 +152,5 @@ class ConversationService:
             raise ServiceError("limit must be a positive integer") from exc
         if limit < 1:
             raise ServiceError("limit must be a positive integer")
-        limit = min(limit, self.MAX_HISTORY_LIMIT)
-        messages = list(
-            self.conversations.messages(
-                conversation,
-                before_seq=before_seq,
-                limit=limit,
-            )
-        )
-        return conversation, list(reversed(messages))
+        limit = min(limit, cls.MAX_HISTORY_LIMIT)
+        return before_seq, limit

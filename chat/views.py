@@ -164,6 +164,44 @@ def create_conversation(request):
 
 
 @require_http_methods(["GET"])
+def search_messages(request, conversation_id):
+    try:
+        conversation, messages = ChatService().search_messages(
+            conversation_id=conversation_id,
+            user_id=request.GET.get("user_id"),
+            query=request.GET.get("q"),
+            before_seq=request.GET.get("before_seq"),
+            limit=request.GET.get("limit", 50),
+        )
+        return JsonResponse(
+            {
+                "conversation_id": str(conversation.conversation_id),
+                "query": request.GET.get("q", "").strip(),
+                "messages": [
+                    {
+                        "message_id": str(message.message_id),
+                        "sender": _user_data(message.sender),
+                        "content": message.content,
+                        "seq": message.seq,
+                        "created_at": message.created_at.isoformat(),
+                        "reply_to": (
+                            {
+                                "message_id": str(message.reply_to.message_id),
+                                "content": message.reply_to.content,
+                            }
+                            if message.reply_to_id
+                            else None
+                        ),
+                    }
+                    for message in messages
+                ],
+            }
+        )
+    except ServiceError as error:
+        return _service_error(error)
+
+
+@require_http_methods(["GET"])
 def load_message_history(request, conversation_id):
     try:
         conversation, messages = ChatService().load_history(

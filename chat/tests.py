@@ -14,6 +14,7 @@ from .models import (
     ConversationMember,
     Message,
     User,
+    UserFriend,
 )
 from .mqtt_messages import (
     CLIENT_EVENT_TOPIC,
@@ -170,6 +171,28 @@ class UserProfileApiTests(TestCase):
         self.assertFalse(User.objects.filter(username="bad-user").exists())
 
 
+class FriendsApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create(username="friend-list-owner")
+        self.friend = User.objects.create(username="friend-entry")
+        UserFriend.objects.bulk_create(
+            [
+                UserFriend(user=self.user, friend=self.friend),
+                UserFriend(user=self.friend, friend=self.user),
+            ]
+        )
+
+    def test_list_friends_returns_friend_users(self):
+        response = self.client.get(f"/api/users/{self.user.user_id}/friends/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [friend["username"] for friend in response.json()["friends"]],
+            ["friend-entry"],
+        )
+
+
 class ConversationApiTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -294,6 +317,82 @@ class ConversationApiTests(TestCase):
             {"user_id": str(self.kevin.user_id)},
         )
         self.assertEqual(forbidden.status_code, 403)
+
+    def test_search_messages_matches_content_within_conversation(self):
+        conversation = Conversation.objects.create(
+            conversation_type=Conversation.ConversationType.PRIVATE
+        )
+        other_conversation = Conversation.objects.create(
+            conversation_type=Conversation.ConversationType.PRIVATE
+        )
+        ConversationMember.objects.bulk_create(
+            [
+                ConversationMember(conversation=conversation, user=self.alex),
+                ConversationMember(conversation=conversation, user=self.sarah),
+                ConversationMember(conversation=other_conversation, user=self.alex),
+                ConversationMember(conversation=other_conversation, user=self.kevin),
+            ]
+        )
+        Message.objects.create(
+            client_message_id="search-hit-1",
+            conversation=conversation,
+            sender=self.alex,
+            content="Project status is ready",
+            seq=1,
+        )
+        Message.objects.create(
+            client_message_id="search-miss",
+            conversation=conversation,
+            sender=self.sarah,
+            content="A different update",
+            seq=2,
+        )
+        Message.objects.create(
+            client_message_id="search-hit-2",
+            conversation=conversation,
+            sender=self.sarah,
+            content="READY for review",
+            seq=3,
+        )
+        Message.objects.create(
+            client_message_id="search-other-conversation",
+            conversation=other_conversation,
+            sender=self.alex,
+            content="Ready in another conversation",
+            seq=1,
+        )
+
+        response = self.client.get(
+            f"/api/conversations/{conversation.conversation_id}/messages/search/",
+            {"user_id": str(self.alex.user_id), "q": "ready"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["content"] for item in response.json()["messages"]],
+            ["Project status is ready", "READY for review"],
+        )
+
+    def test_search_messages_requires_membership_and_nonempty_query(self):
+        conversation = Conversation.objects.create(
+            conversation_type=Conversation.ConversationType.PRIVATE
+        )
+        ConversationMember.objects.create(
+            conversation=conversation,
+            user=self.alex,
+        )
+
+        forbidden = self.client.get(
+            f"/api/conversations/{conversation.conversation_id}/messages/search/",
+            {"user_id": str(self.kevin.user_id), "q": "ready"},
+        )
+        missing_query = self.client.get(
+            f"/api/conversations/{conversation.conversation_id}/messages/search/",
+            {"user_id": str(self.alex.user_id), "q": "  "},
+        )
+
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(missing_query.status_code, 400)
 
 
 class MqttPresenceTests(TransactionTestCase):

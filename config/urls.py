@@ -45,6 +45,11 @@ urlpatterns = [
     ),
     path("api/conversations/", views.create_conversation, name="create-conversation"),
     path(
+        "api/conversations/<uuid:conversation_id>/messages/search/",
+        views.search_messages,
+        name="search-messages",
+    ),
+    path(
         "api/conversations/<uuid:conversation_id>/messages/",
         views.load_message_history,
         name="load-message-history",

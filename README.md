@@ -1,38 +1,38 @@
-# MQTT Chat System
+# Hệ thống trò chuyện MQTT
 
-A Django-based realtime chat project built around MQTT messaging and MySQL persistence. The system is designed to support private chat, group chat, message delivery tracking, typing indicators, and presence updates with a broker-based architecture.
+Dự án trò chuyện thời gian thực trên Django, sử dụng MQTT để truyền tin và MySQL để lưu trữ dữ liệu. Hệ thống hỗ trợ trò chuyện cá nhân, trò chuyện nhóm, theo dõi trạng thái gửi tin, chỉ báo đang nhập và trạng thái trực tuyến thông qua kiến trúc broker.
 
-## Project Overview
+## Tổng quan dự án
 
-This project follows a modern messaging architecture where:
+Dự án sử dụng kiến trúc nhắn tin hiện đại:
 
-- MQTT is used for realtime transport and event delivery.
-- Django handles business logic and API flow.
-- MySQL stores the source of truth for users, conversations, messages, and delivery receipts.
+- MQTT đảm nhiệm truyền dữ liệu thời gian thực và phân phối sự kiện.
+- Django xử lý nghiệp vụ và luồng API.
+- MySQL lưu dữ liệu chính thức về người dùng, cuộc trò chuyện, tin nhắn và xác nhận gửi/nhận.
 
-Core design principle:
+Nguyên tắc thiết kế:
 
-- MQTT handles realtime communication.
-- MySQL handles durable storage.
-- Django handles validation, orchestration, and business rules.
+- MQTT xử lý giao tiếp thời gian thực.
+- MySQL xử lý việc lưu trữ bền vững.
+- Django xử lý kiểm tra dữ liệu, điều phối và các quy tắc nghiệp vụ.
 
-## Features
+## Tính năng
 
-- Private chat
-- Group chat
-- User avatar uploads
-- Realtime message delivery
-- Message persistence in MySQL
-- Message ordering
-- Duplicate protection
-- Offline synchronization
-- Sent / Delivered / Read status
-- Typing indicator
-- Online / Offline presence
-- MQTT Last Will support
-- Django admin for testing and maintenance
+- Trò chuyện cá nhân
+- Trò chuyện nhóm
+- Tải ảnh đại diện người dùng
+- Gửi và nhận tin nhắn thời gian thực
+- Lưu tin nhắn trong MySQL
+- Sắp xếp thứ tự tin nhắn
+- Chống tin nhắn trùng lặp
+- Đồng bộ khi ngoại tuyến
+- Trạng thái Đã gửi / Đã nhận / Đã đọc
+- Chỉ báo đang nhập
+- Trạng thái Trực tuyến / Ngoại tuyến
+- Hỗ trợ MQTT Last Will
+- Django Admin để kiểm thử và quản trị
 
-## Technology Stack
+## Công nghệ sử dụng
 
 - Python 3
 - Django 6.1.1
@@ -40,16 +40,16 @@ Core design principle:
 - mysqlclient
 - Paho MQTT
 - Mosquitto broker
-- JSON message format
+- Định dạng tin nhắn JSON
 - React + Vite + MQTT.js (frontend)
 
-## Project Structure
+## Cấu trúc dự án
 
 ```text
 mqtt_chat/
 ├── manage.py
 ├── requirements.txt
-├── frontend/                # React UI, HTTP/MQTT client and FE tests
+├── frontend/                # Giao diện React, HTTP/MQTT client và kiểm thử FE
 ├── .venv/
 ├── db.sqlite3
 ├── config/
@@ -82,22 +82,22 @@ mqtt_chat/
 └── README.md
 ```
 
-## Local Development Setup
+## Cài đặt môi trường phát triển
 
-### 1. Create and activate a virtual environment
+### 1. Tạo và kích hoạt môi trường ảo
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 ```
 
-### 2. Install dependencies
+### 2. Cài đặt các thư viện phụ thuộc
 
 ```bash
 pip install -r requirements.txt
 ```
 
-The project dependencies include:
+Dự án sử dụng các thư viện:
 
 ```text
 asgiref==3.12.1
@@ -108,11 +108,11 @@ sqlparse==0.6.0
 tzdata==2026.4
 ```
 
-### 3. Configure MySQL
+### 3. Cấu hình MySQL
 
-This project is configured for MySQL on port `3307` instead of the default MariaDB/XAMPP port `3306`.
+Dự án được cấu hình sử dụng MySQL ở cổng `3307` thay vì cổng mặc định `3306` của MariaDB/XAMPP.
 
-Create the database:
+Tạo cơ sở dữ liệu:
 
 ```sql
 CREATE DATABASE mqtt_chat
@@ -120,7 +120,7 @@ CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
 ```
 
-Then verify the Django database settings in `config/settings.py`:
+Kiểm tra lại cấu hình cơ sở dữ liệu Django trong `config/settings.py`:
 
 ```python
 DATABASES = {
@@ -138,76 +138,84 @@ DATABASES = {
 }
 ```
 
-For production or team projects, avoid hardcoding secrets directly in source code. Prefer environment variables or a `.env` file.
+Với môi trường production hoặc dự án làm việc nhóm, không nên ghi cứng thông tin bí mật trong mã nguồn. Hãy ưu tiên biến môi trường hoặc file `.env`.
 
-### 4. Apply migrations
+### 4. Chạy migration
 
 ```bash
 python manage.py migrate
 ```
 
-### 5. Run the Django development server
+### 5. Khởi động máy chủ phát triển Django
 
 ```bash
 python manage.py runserver
 ```
 
-Open:
+Mở:
 
 ```text
 http://127.0.0.1:8000/
 ```
 
-## User Avatars
+## Ảnh đại diện người dùng
 
-Upload an avatar using `POST /api/users/{user_id}/avatar/` with a multipart
-form field named `avatar`. JPEG, PNG, GIF, BMP, and WebP files up to 5 MB are
-accepted. Use `DELETE` on the same endpoint to remove the avatar. User API
-responses include `avatar_url`, which is `null` when no avatar is set. In
-development, uploaded files are served from `/media/`; configure media storage
-and serving separately for production.
+Tải ảnh đại diện bằng `POST /api/users/{user_id}/avatar/` với trường multipart
+tên `avatar`. Hệ thống chấp nhận ảnh JPEG, PNG, GIF, BMP và WebP có dung lượng
+tối đa 5 MB. Dùng `DELETE` trên cùng endpoint để xóa ảnh. Phản hồi API người
+dùng có trường `avatar_url`, nhận giá trị `null` nếu chưa có ảnh. Trong môi
+trường phát triển, file tải lên được phục vụ từ `/media/`; môi trường production
+cần cấu hình riêng việc lưu trữ và phục vụ media.
 
-## User Profiles and Conversations
+## Hồ sơ người dùng và cuộc trò chuyện
 
-Create users with `username` and optional `status` (`online` or `offline`),
-`short_bio` (up to 160 characters), `bio`, and `sex` (`female` or `male`).
-New users default to `offline`; `PATCH /api/users/{user_id}/` accepts any
-subset of these fields.
+Tạo người dùng với `username` và các trường tùy chọn `status` (`online` hoặc
+`offline`), `short_bio` (tối đa 160 ký tự), `bio` và `sex` (`female` hoặc
+`male`). Người dùng mới mặc định có trạng thái `offline`;
+`PATCH /api/users/{user_id}/` chấp nhận một phần hoặc toàn bộ các trường trên.
 
-Create or reuse a private conversation with
+Tạo mới hoặc sử dụng lại cuộc trò chuyện cá nhân bằng
 `POST /api/conversations/` and JSON `{"user_id":"...","type":"PRIVATE","username":"peer"}`.
-Create a group with `{"user_id":"...","type":"GROUP","name":"Team","usernames":["peer1","peer2"]}`;
-the creator is added as a member automatically. Usernames must exist, and a
-private conversation is reused only when its exact two members match.
+Tạo nhóm bằng `{"user_id":"...","type":"GROUP","name":"Team","usernames":["peer1","peer2"]}`;
+người tạo sẽ tự động được thêm vào nhóm. Username phải tồn tại. Cuộc trò chuyện
+cá nhân chỉ được sử dụng lại khi có đúng hai thành viên trùng khớp.
 
-Load messages with
+Tải tin nhắn bằng
 `GET /api/conversations/{conversation_id}/messages/?user_id={user_id}`.
-Only conversation members can read history. `limit` defaults to 50 and is
-capped at 100; `before_seq` returns messages preceding that sequence number.
+Chỉ thành viên cuộc trò chuyện mới có thể đọc lịch sử. `limit` mặc định là 50 và
+giới hạn tối đa 100; `before_seq` trả về các tin nhắn trước số thứ tự đó.
 
-## MQTT Broker Setup
+Tìm tin nhắn theo nội dung trong một cuộc trò chuyện bằng
+`GET /api/conversations/{conversation_id}/messages/search/?user_id={user_id}&q={keyword}`.
+Tìm kiếm không phân biệt chữ hoa/chữ thường, chỉ áp dụng trong cuộc trò chuyện
+được chỉ định và chỉ thành viên mới có quyền truy cập. `q` là bắt buộc;
+`limit` mặc định là 50, tối đa 100, và `before_seq` phân trang về các kết quả
+có số thứ tự nhỏ hơn giá trị đã cho. Phản hồi gồm `conversation_id`, `query`
+và danh sách `messages` theo thứ tự thời gian.
 
-A Mosquitto broker should be running for the realtime message layer.
+## Cấu hình MQTT Broker
 
-Example broker connection:
+Cần khởi động Mosquitto broker để phục vụ tầng tin nhắn thời gian thực.
+
+Thông tin kết nối broker mẫu:
 
 - Host: `127.0.0.1`
 - Port: `1883`
 
-Start the Django presence subscriber with:
+Khởi động tiến trình Django theo dõi trạng thái người dùng:
 
 ```bash
 python manage.py run_mqtt_presence
 ```
 
-It reads `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME`, and `MQTT_PASSWORD` from
-the environment (host and port default to `127.0.0.1:1883`) and subscribes to
-`chat/users/+/status`. MQTT clients publish the literal payload `online` or
-`offline` to `chat/users/{user_id}/status` at QoS 1. Set a retained `offline`
-Last Will on that topic before connecting, and publish retained `online` after
-connecting, so unexpected disconnects also update the database.
+Tiến trình đọc `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME` và `MQTT_PASSWORD` từ
+biến môi trường (mặc định host và port là `127.0.0.1:1883`) rồi subscribe vào
+`chat/users/+/status`. MQTT client publish payload `online` hoặc `offline` tới
+`chat/users/{user_id}/status` với QoS 1. Hãy đặt Last Will `offline` dạng retained
+trên topic trước khi kết nối và publish `online` dạng retained sau khi kết nối để
+việc ngắt kết nối bất ngờ cũng được cập nhật vào cơ sở dữ liệu.
 
-The system design expects a broker topic model similar to:
+Thiết kế hệ thống sử dụng mô hình topic tương tự:
 
 ```text
 chat/client/{user_id}/command/send
@@ -215,14 +223,14 @@ chat/client/{user_id}/command/sync
 chat/client/{user_id}/command/delivered
 ```
 
-Run the message worker in a separate terminal from Django's web server:
+Chạy message worker trong terminal riêng, tách khỏi web server Django:
 
 ```bash
 python manage.py run_mqtt_worker
 ```
 
-It subscribes to `chat/client/+/command/send`. Publish a JSON object to
-`chat/client/{user_id}/command/send`, where `{user_id}` is the sender UUID:
+Worker subscribe vào `chat/client/+/command/send`. Publish một object JSON tới
+`chat/client/{user_id}/command/send`, trong đó `{user_id}` là UUID của người gửi:
 
 ```json
 {
@@ -233,20 +241,20 @@ It subscribes to `chat/client/+/command/send`. Publish a JSON object to
 }
 ```
 
-Do not include `seq`: the worker allocates it while locking the conversation
-row inside a database transaction. This serializes sends in one conversation
-without blocking sends to other conversations. The database also enforces
-unique `(conversation, seq)` and `(sender, client_message_id)` constraints.
-Retries with the same client ID and unchanged message content return the
-original sequence as a duplicate acknowledgment; reusing that ID for different
-message data returns an error.
+Không gửi trường `seq`: worker sẽ tự cấp số thứ tự trong lúc khóa dòng cuộc trò
+chuyện bên trong một transaction cơ sở dữ liệu. Cách này tuần tự hóa việc gửi
+trong cùng một cuộc trò chuyện nhưng không chặn các cuộc trò chuyện khác. Cơ sở
+dữ liệu cũng áp dụng ràng buộc duy nhất cho `(conversation, seq)` và
+`(sender, client_message_id)`. Khi retry với cùng client ID và nội dung không
+đổi, hệ thống trả về số thứ tự ban đầu dưới dạng xác nhận trùng lặp; nếu dùng
+lại ID đó cho dữ liệu tin nhắn khác, hệ thống trả về lỗi.
 
-The sender receives `MESSAGE_ACCEPTED` on
-`chat/client/{user_id}/event/message_accepted`, or `ERROR` on
-`chat/client/{user_id}/event/error`. New messages are broadcast after database
-commit on `chat/conversations/{conversation_id}/event/message_created`.
-Configure Mosquitto authentication and ACLs so a client can publish commands
-only under its own user ID and subscribe only to authorized event topics.
+Người gửi nhận sự kiện `MESSAGE_ACCEPTED` tại
+`chat/client/{user_id}/event/message_accepted`, hoặc `ERROR` tại
+`chat/client/{user_id}/event/error`. Tin nhắn mới được broadcast sau khi commit
+cơ sở dữ liệu tại `chat/conversations/{conversation_id}/event/message_created`.
+Cấu hình xác thực và ACL của Mosquitto để client chỉ được publish command dưới
+user ID của chính mình và chỉ subscribe các event topic được cấp quyền.
 
 ## Frontend — tiến độ ngày 29/09/2026
 
@@ -254,9 +262,14 @@ FE được triển khai trong `frontend/` bằng **React + Vite + MQTT.js**, đ
 `chat/views.py`, `config/urls.py` và `chat/mqtt_messages.py` tại BE commit `7dc68e8`.
 
 **Trạng thái:** đã có giao diện và adapter cho API/MQTT hiện có; đã build và kiểm thử
+<<<<<<< Updated upstream
 FE riêng. **Ngày 01/10 đã kiểm tra với Django + MySQL + Mosquitto local và cả hai worker thật**;
 môi trường triển khai/ACL của nhóm vẫn cần nghiệm thu riêng.
 Không coi chức năng trong danh sách Features phía trên là đã hoàn thành toàn bộ.
+=======
+FE riêng. **Chưa nghiệm thu end-to-end với Django + MySQL + Mosquitto của nhóm**.
+Không coi các chức năng trong danh sách Tính năng phía trên là đã hoàn thành toàn bộ.
+>>>>>>> Stashed changes
 
 ### Đã làm được
 
@@ -363,19 +376,19 @@ npm run build
 
 Chi tiết cấu trúc FE, cấu hình và fixture: [frontend/README.md](frontend/README.md).
 
-## Recommended Next Steps
+## Các bước đề xuất tiếp theo
 
-Remaining messaging milestones include:
+Các hạng mục nhắn tin còn lại:
 
-1. Add delivery/read receipt and offline synchronization APIs.
-2. Validate the implemented frontend HTTP/MQTT client against the team's running backend (see frontend progress above).
+1. Bổ sung API xác nhận đã nhận/đã đọc và đồng bộ khi ngoại tuyến.
+2. Kiểm thử HTTP/MQTT client của frontend với backend đang chạy của nhóm (xem tiến độ frontend ở trên).
 
-## Notes
+## Ghi chú
 
-- The current database configuration uses MySQL on port `3307` because `3306` is occupied by the local MariaDB/XAMPP installation.
-- This project is intended for learning and prototype development, with a clear separation between MQTT transport and persistent database storage.
-- The app is designed to grow from a CLI/client-first architecture into a richer web or desktop chat experience.
+- Cấu hình cơ sở dữ liệu hiện dùng MySQL ở cổng `3307` vì cổng `3306` đang được MariaDB/XAMPP cục bộ sử dụng.
+- Dự án phục vụ mục đích học tập và phát triển prototype, với sự phân tách rõ ràng giữa truyền tải MQTT và lưu trữ dữ liệu bền vững.
+- Ứng dụng được thiết kế để phát triển từ kiến trúc ưu tiên CLI/client thành trải nghiệm web hoặc desktop đầy đủ hơn.
 
-## License
+## Giấy phép
 
-This project is for academic / development use unless a specific project license is added later.
+Dự án phục vụ mục đích học tập và phát triển, trừ khi có giấy phép riêng được bổ sung sau này.

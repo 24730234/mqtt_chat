@@ -44,7 +44,7 @@ class UserRepository:
         return UserFriend.objects.filter(user=first, friend=second).exists()
 
     def friends(self, user):
-        return User.objects.filter(friend_of__user=user).distinct().order_by("username")
+        return User.objects.filter(friend_of=user).distinct().order_by("username")
 
     def remove_friendship(self, first, second):
         return UserFriend.objects.filter(

@@ -64,6 +64,17 @@ class ChatService:
             limit=limit,
         )
 
+    def search_messages(
+        self, conversation_id, user_id, query, before_seq=None, limit=50
+    ):
+        return self.conversation_service.search_messages(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            query=query,
+            before_seq=before_seq,
+            limit=limit,
+        )
+
     def send_message(
         self,
         sender_id,

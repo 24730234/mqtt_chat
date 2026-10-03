@@ -59,3 +59,11 @@ class ConversationRepository:
         if before_seq is not None:
             messages = messages.filter(seq__lt=before_seq)
         return messages.order_by("-seq")[:limit]
+
+    def search_messages(self, conversation, query, before_seq=None, limit=50):
+        messages = conversation.messages.select_related("sender", "reply_to").filter(
+            content__icontains=query
+        )
+        if before_seq is not None:
+            messages = messages.filter(seq__lt=before_seq)
+        return messages.order_by("-seq")[:limit]
