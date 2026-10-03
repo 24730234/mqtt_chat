@@ -309,9 +309,9 @@ Không coi chức năng trong danh sách Features phía trên là đã hoàn th�
 - Kiểm tra lại: **18/18 tests qua**, `npm run build` thành công; tìm `thien_fixture`, mở hội thoại mẫu và gửi tin nhận ACK trên trình duyệt.
 - Chưa nghiệm thu với backend thật của nhóm. Các mục còn chờ BE được liệt kê ở checklist integrate bên dưới.
 
-### Tích hợp backend thật ngày 01/10/2026
+### Tích hợp backend thật, cập nhật ngày 03/10/2026
 
-- Đã chạy `run_mqtt_worker` và `run_mqtt_presence` trong hai container riêng cùng Django, MySQL 8.4 và Mosquitto 2; log xác nhận subscribe đúng topic.
+- Đã chạy trực tiếp `run_mqtt_worker` và `run_mqtt_presence` cùng Django, MySQL 8.4 và Mosquitto 2; log xác nhận subscribe đúng topic. Không dùng Docker.
 - Đã qua **9 nhóm kiểm tra tích hợp thật**: user/nhóm, presence online/offline lưu DB, ACK và broadcast, retry chống trùng, history 50 + 5 tin/reply, tìm kiếm server, quyền history 403, hồ sơ và upload/GET/xóa avatar.
 - Đã gửi tin trực tiếp từ FE qua broker thật và nhận xác nhận lưu MySQL; **18/18 unit tests FE + build** vẫn qua.
 - FE: `http://127.0.0.1:5173/?mode=live`, API base `/api`, MQTT `ws://127.0.0.1:9001`. User sau chạy smoke: `quang_live`, `thien_live`.
@@ -383,6 +383,7 @@ npm run build
 6. Chốt semantics presence khi cùng user mở nhiều tab: topic status hiện là một topic/user nên một tab ngắt có thể đánh dấu offline cho cả user.
 
 Chi tiết cấu trúc FE, cấu hình và fixture: [frontend/README.md](frontend/README.md).
+Báo cáo đầy đủ theo mức ưu tiên: [FE_BE_GAP_REVIEW_2026-10-03.md](FE_BE_GAP_REVIEW_2026-10-03.md).
 
 ## Các bước đề xuất tiếp theo
 

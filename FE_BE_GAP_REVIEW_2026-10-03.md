@@ -1,47 +1,70 @@
 # Rà soát tính năng FE và BE
 
-**Ngày rà soát:** 03/10/2026  
-**Phạm vi:** Đối chiếu giao diện live trong `frontend/src/live/` với API routes, Django views/services và MQTT worker hiện có.
+**Cập nhật:** 03/10/2026
+
+**Code đã đối chiếu:** `origin/main` tại `78f0fe7`, FE tại `16bbbf5`
+
+**Phạm vi:** `frontend/src/live/`, Django routes/views/services/models và hai MQTT worker.
 
 ## Kết luận
 
-FE đã tích hợp được các luồng cơ bản của prototype chat: chọn/tạo người dùng, cập nhật hồ sơ và avatar, tạo hội thoại cá nhân/nhóm, bạn bè/lời mời, tải lịch sử, reply, gửi tin nhắn qua MQTT và presence.
+Luồng chat cốt lõi đã hoạt động end-to-end không dùng Docker: chọn/tạo user, hồ sơ và
+avatar, bạn bè cơ bản, tạo chat cá nhân/nhóm, lịch sử phân trang, tìm kiếm trên server,
+reply, gửi/nhận realtime, chống trùng, retry và presence. Đã qua 21 test BE, 18 test FE,
+production build và 9 nhóm smoke test với MySQL/Mosquitto cùng hai worker thật.
 
-Một số chức năng FE còn thiếu hoặc mới chỉ có hành vi cục bộ. Đặc biệt, API tìm kiếm tin nhắn đã có ở BE nhưng FE chưa sử dụng. Các mục liên quan xác thực, đồng bộ offline, receipts/typing và quản lý hội thoại cần có contract/service phía BE trước khi hoàn thiện.
+Phần mềm vẫn là prototype vì chưa có xác thực và nhiều contract backend cần cho trải
+nghiệm chat hoàn chỉnh. Không nên chỉ bổ sung giao diện giả cho các mục chưa có contract.
 
-## Các hạng mục còn thiếu hoặc chưa hoàn chỉnh
+## Những phần đã hoàn thành
 
-| Ưu tiên | Hạng mục | Hiện trạng FE | Hiện trạng BE / phần cần bổ sung |
+- Tìm kiếm tin nhắn đã gọi endpoint server, debounce 300 ms và hủy request cũ.
+- Tạo/tìm/cập nhật user; upload/xóa avatar.
+- Tạo hoặc dùng lại chat cá nhân; tạo nhóm.
+- Lịch sử 50 tin/trang, tải trang cũ theo `before_seq`.
+- MQTT send, ACK nghiệp vụ, broadcast, reply, retry giữ nguyên client UUID và chống trùng.
+- Presence online/offline, reconnect và resubscribe cơ bản.
+- Xem/xóa bạn, gửi lời mời và phản hồi lời mời bằng UUID.
+
+## Phần còn thiếu
+
+| Ưu tiên | Hạng mục | FE hiện tại | Backend/contract cần có |
 | --- | --- | --- | --- |
-| Cao | Tìm tin nhắn trong toàn bộ hội thoại | Ô tìm kiếm hiện chỉ lọc các tin đã tải vào trình duyệt. Adapter FE chưa có hàm gọi search messages. | Đã có `GET /api/conversations/{conversation_id}/messages/search/`, gồm kiểm tra thành viên và phân trang. Cần nối adapter và UI FE vào endpoint. |
-| Cao | Đăng nhập và xác thực danh tính | Live mode cho phép chọn hoặc tạo user; chưa có đăng nhập. | API/MQTT hiện nhận `user_id` từ client, chưa xác thực danh tính hoặc ràng buộc quyền client với user đó. Cần thiết kế auth và cơ chế xác thực MQTT trước khi dùng production. |
-| Cao | Đồng bộ offline đầy đủ | Khi reconnect, FE tải lại tối đa 50 tin mới nhất. Không có outbox bền vững; draft và tin chờ xác nhận nằm trong bộ nhớ phiên, có thể mất khi reload. | Chưa có contract đồng bộ tin bị bỏ lỡ theo sequence/cursor. Cần API hoặc MQTT sync command cùng quy tắc phân trang/resume. |
-| Trung bình | Danh sách và chi tiết hội thoại | Danh sách hội thoại được lưu cục bộ theo API base và user. Mở hội thoại chưa biết cần nhập UUID; metadata nhóm có thể không đầy đủ. | Chưa có API GET danh sách hội thoại hoặc chi tiết hội thoại/thành viên. |
-| Trung bình | Hộp thư lời mời kết bạn | FE gửi lời mời và phản hồi bằng invitation UUID được chia sẻ thủ công. | Có API gửi và phản hồi lời mời, nhưng chưa có API liệt kê lời mời đến/đi hoặc trạng thái pending cho người dùng. |
-| Trung bình | Đã nhận / đã đọc | Live UI chỉ xác nhận tin đã được lưu trên server; chưa hiển thị receipt DELIVERED/READ thật. | Model `MessageReceipt` có trạng thái `DELIVERED` và `READ`, nhưng chưa thấy service/API/MQTT handler để tạo, cập nhật và phân phối receipt. |
-| Trung bình | Chỉ báo đang nhập | FE chưa gửi/nhận trạng thái typing. | Chưa có topic hoặc contract typing ở BE. |
-| Trung bình | Quản lý nhóm sau khi tạo | FE hỗ trợ tạo nhóm và xem thông tin thành viên hiện có. Chưa có thao tác quản lý nhóm. | Chưa có API sửa tên nhóm, thêm/xóa thành viên, rời nhóm hoặc xóa nhóm. |
-| Thấp | Unread count bền vững | Unread được tăng từ event nhận trong phiên và đặt về 0 khi mở hội thoại. | Chưa có unread/read state lưu ở BE; số đếm FE có thể mất hoặc lệch sau reload/đăng nhập trên thiết bị khác. |
-| Thấp | Presence nhiều tab/thiết bị | FE publish presence theo một topic trên mỗi user, dùng retained online và Last Will offline. | Cách biểu diễn hiện tại có thể đánh dấu user offline khi một trong nhiều tab/thiết bị ngắt kết nối. Cần thống nhất presence theo session hoặc cơ chế đếm kết nối. |
+| P0 | Đăng nhập và xác thực | Người dùng có thể chọn bất kỳ username/UUID. | Auth HTTP, token/session và xác thực MQTT/ACL gắn client với đúng user. |
+| P0 | Danh sách hội thoại từ server | Catalog chỉ lưu trong trình duyệt; đổi máy hoặc xóa storage sẽ mất. | GET danh sách hội thoại theo user và GET chi tiết hội thoại/thành viên. |
+| P0 | Đồng bộ offline đầy đủ | Reconnect chỉ tải 50 tin mới nhất; pending/draft mất khi reload. | Sync theo cursor/sequence, quy tắc resume và có thể cần outbox bền vững. |
+| P1 | Đã nhận / đã đọc | Chỉ hiển thị “Đã lưu trên máy chủ”. | Service/API/MQTT handler cho `MessageReceipt`; model hiện có nhưng chưa được sử dụng. |
+| P1 | Chỉ báo đang nhập | Chưa gửi hoặc hiển thị typing. | Topic, payload, TTL và quyền publish/subscribe cho typing. |
+| P1 | Hộp thư lời mời | Người nhận phải nhập `invitation_id` thủ công. | API liệt kê lời mời đến/đi và trạng thái pending. |
+| P1 | Quản lý nhóm | Chỉ tạo và xem thành viên có trong response/history. | API đổi tên, thêm/xóa thành viên, rời nhóm, quyền quản trị và xóa nhóm nếu cần. |
+| P1 | Unread bền vững | Đếm trong phiên và đặt về 0 khi mở; reload có thể lệch. | Read cursor/unread state lưu trên server, đồng bộ nhiều thiết bị. |
+| P2 | Presence nhiều tab/thiết bị | Một tab đóng có thể publish offline dù tab khác còn mở. | Presence theo session/device hoặc bộ đếm kết nối có timeout. |
+| P2 | Tìm kiếm nâng cao | Hiện tối đa 50 kết quả mới nhất và chưa tải tiếp/nhảy về ngữ cảnh. | Contract/context quanh kết quả hoặc dùng `before_seq` để phân trang kết quả. |
+| P2 | Tin nhắn đa phương tiện | Composer chỉ gửi text. | Contract upload/storage, metadata và giới hạn file trước khi làm UI. |
+| P2 | Sửa/xóa tin nhắn | Chưa có thao tác. | API/topic, quyền, audit và event cập nhật/xóa realtime. |
+| P2 | Thông báo nền | Chưa có browser/push notification. | Quyết định phạm vi notification, quyền người dùng và service push nếu cần. |
 
-## Đã có tích hợp ở FE
+## Việc FE có thể làm ngay
 
-- Tìm user theo username, tạo user và cập nhật hồ sơ.
-- Upload/xóa avatar.
-- Tạo hội thoại cá nhân hoặc nhóm.
-- Xem/xóa bạn; gửi và phản hồi lời mời theo invitation UUID.
-- Tải lịch sử có phân trang theo `before_seq`.
-- Gửi tin nhắn realtime, reply, nhận ACK/broadcast, chống trùng và retry với cùng client message ID.
-- Theo dõi presence và tự reconnect/resubscribe MQTT ở mức cơ bản.
+1. Thêm phân trang kết quả tìm kiếm bằng `before_seq` và trạng thái tải thêm.
+2. Lưu draft/outbox tạm vào IndexedDB để giảm mất dữ liệu khi reload; quy tắc reconcile
+   cuối cùng vẫn cần contract sync từ BE.
+3. Hoàn thiện loading skeleton, keyboard focus, thông báo lỗi/toast và responsive QA.
+4. Bổ sung E2E browser test cho chọn user, mở hội thoại, gửi/retry và tìm kiếm.
 
-## Thứ tự đề xuất
+## Việc cần chốt với BE trước
 
-1. Nối FE vào API tìm kiếm tin nhắn BE đã có và hỗ trợ điều hướng đến kết quả trong lịch sử.
-2. Chốt thiết kế xác thực user cho HTTP và MQTT trước khi triển khai ra môi trường chia sẻ/production.
-3. Bổ sung API danh sách/chi tiết hội thoại và inbox lời mời để bỏ thao tác nhập UUID thủ công.
-4. Chốt contract đồng bộ offline, receipt và typing; sau đó triển khai service/endpoint/topic BE và tích hợp FE.
-5. Bổ sung API quản lý thành viên/metadata nhóm và xử lý presence nhiều phiên nếu nằm trong phạm vi sản phẩm.
+1. Auth HTTP + MQTT ACL.
+2. API danh sách/chi tiết hội thoại và inbox lời mời.
+3. Contract sync offline, delivered/read và typing.
+4. API quản lý nhóm, unread cursor và presence nhiều phiên.
+5. Có đưa attachment, sửa/xóa tin và notification vào phạm vi đồ án hay không.
 
-## Ghi chú phạm vi
+## Tiêu chí để gọi là bản hoàn thiện tối thiểu
 
-Đây là rà soát tĩnh dựa trên mã nguồn hiện có tại thời điểm **03/10/2026**; không phải nghiệm thu end-to-end với Django, database và Mosquitto đang chạy. Các mục được đánh dấu thiếu có nghĩa là chưa thấy luồng triển khai đầy đủ qua các lớp cần thiết, không chỉ dựa trên tên model hoặc tài liệu mô tả.
+- Người dùng đăng nhập và không thể giả mạo user khác.
+- Đăng nhập trên trình duyệt mới vẫn thấy đủ hội thoại và unread đúng.
+- Tin gửi khi mạng chập chờn không mất hoặc nhân đôi; reconnect lấy đủ phần bị bỏ lỡ.
+- Có inbox lời mời, trạng thái delivered/read và typing hoạt động qua hai client thật.
+- Nhóm có luồng quản lý thành viên/quyền rõ ràng.
+- Các luồng chính có test tự động và được kiểm tra với broker/database thật.
