@@ -11,6 +11,19 @@ cp .env.example .env.local
 npm run dev
 ```
 
+Các file Run Configuration do nhóm BE cung cấp có vai trò như sau:
+
+- `chat_app.run.xml`: chạy Django ở cổng `8000`.
+- `mqtt_message_connect.run.xml`: chạy `manage.py run_mqtt_worker`.
+- `mqtt_presence_connect.run.xml`: chạy `manage.py run_mqtt_presence`.
+- `debug chat app.run.xml`: compound configuration bật đồng thời ba process trên.
+
+Compound configuration chỉ khởi động backend và hai MQTT worker, **không khởi động UI**.
+Sau khi backend, MySQL và Mosquitto đã sẵn sàng, vẫn mở terminal tại `frontend/` và chạy
+`npm run dev`. Các file đồng nghiệp gửi chứa đường dẫn Windows riêng của máy họ; khi import
+vào JetBrains trên máy khác cần đổi interpreter, working directory và đường dẫn `manage.py`
+theo repository local.
+
 - Demo: `http://127.0.0.1:5173/`.
 - Live: `http://127.0.0.1:5173/?mode=live`, hoặc nút **KẾT NỐI BE** trong demo.
 - Live chưa có auth: chọn user tồn tại bằng tìm username hoặc tạo user. Không nhập tài khoản giả từ demo vào BE.
