@@ -359,7 +359,7 @@ Kết quả xác nhận lại ngày 04/10:
 - Giao diện live tải thành công tại `http://127.0.0.1:5173/?mode=live`.
 
 Các phần chưa hoàn thiện được phân loại FE/BE và mức ưu tiên trong
-[FE_BE_GAP_REVIEW_2026-10-03.md](FE_BE_GAP_REVIEW_2026-10-03.md). Ba việc cần phối hợp BE
+[REVIEW_03-10-26.md](REVIEW_03-10-26.md). Ba việc cần phối hợp BE
 trước là xác thực HTTP/MQTT, API danh sách hội thoại và contract đồng bộ offline.
 
 ### Cách chạy FE
@@ -415,7 +415,7 @@ npm run build
 6. Chốt semantics presence khi cùng user mở nhiều tab: topic status hiện là một topic/user nên một tab ngắt có thể đánh dấu offline cho cả user.
 
 Chi tiết cấu trúc FE, cấu hình và fixture: [frontend/README.md](frontend/README.md).
-Báo cáo đầy đủ theo mức ưu tiên: [FE_BE_GAP_REVIEW_2026-10-03.md](FE_BE_GAP_REVIEW_2026-10-03.md).
+Báo cáo đầy đủ theo mức ưu tiên: [REVIEW_03-10-26.md](REVIEW_03-10-26.md).
 
 ## Các bước đề xuất tiếp theo
 
