@@ -330,6 +330,38 @@ Không coi chức năng trong danh sách Features phía trên là đã hoàn th�
   [integration/README.md](integration/README.md).
 - Kiểm tra lại: **21/21 tests BE, 18/18 tests FE, production build và 9/9 nhóm smoke test đều qua**.
 
+### Rà soát toàn bộ và bàn giao FE ngày 04/10/2026
+
+Đã đồng bộ và kiểm tra lại `origin/main` tại commit `78f0fe7`. Nhánh FE hiện bao gồm:
+
+- Giao diện React/Vite responsive có demo riêng và live mode kết nối Django/MQTT thật.
+- Chọn/tạo user; chỉnh username, giới thiệu, giới tính và upload/xóa avatar.
+- Tìm user, xem/xóa bạn, gửi lời mời và phản hồi lời mời bằng UUID theo contract hiện có.
+- Tạo chat cá nhân/nhóm, mở hội thoại bằng UUID và lưu catalog riêng theo API/user trên trình duyệt.
+- Tải lịch sử 50 tin/trang, tải tin cũ, reply và xử lý lỗi quyền 403/không tồn tại 404.
+- Tìm toàn bộ tin nhắn của hội thoại qua endpoint server, debounce request và hủy request cũ.
+- Gửi/nhận realtime qua MQTT WebSocket; optimistic message, ACK nghiệp vụ, broadcast,
+  chống trùng, server sequence, timeout và retry giữ nguyên client message UUID.
+- Presence online/offline với retained Last Will; reconnect, resubscribe và tải lại lịch sử.
+- Cấu hình local không Docker cho MySQL 8.4, Mosquitto, Django, Vite cùng hai process
+  `run_mqtt_worker` và `run_mqtt_presence`.
+- Ghi rõ vai trò của bốn JetBrains Run Configuration do nhóm BE cung cấp: compound config
+  chỉ chạy Django và hai worker; UI vẫn chạy riêng theo `frontend/README.md`.
+
+Kết quả xác nhận lại ngày 04/10:
+
+- **21/21 test backend qua**, Django system check không có lỗi.
+- **18/18 test frontend qua** và Vite production build thành công.
+- **9/9 nhóm smoke test qua** với MySQL/Mosquitto thật: user/nhóm, presence, ACK/broadcast,
+  retry chống trùng, history 50 + 5/reply, tìm kiếm server, quyền 403, profile/avatar và offline.
+- Kiểm tra process xác nhận MySQL `3307`, Mosquitto TCP `1883`, WebSocket `9001`, Django
+  `8000`, Vite `5173` và cả hai MQTT worker đang chạy trực tiếp, không có Docker trong luồng này.
+- Giao diện live tải thành công tại `http://127.0.0.1:5173/?mode=live`.
+
+Các phần chưa hoàn thiện được phân loại FE/BE và mức ưu tiên trong
+[FE_BE_GAP_REVIEW_2026-10-03.md](FE_BE_GAP_REVIEW_2026-10-03.md). Ba việc cần phối hợp BE
+trước là xác thực HTTP/MQTT, API danh sách hội thoại và contract đồng bộ offline.
+
 ### Cách chạy FE
 
 Yêu cầu Node.js phù hợp với Vite (khuyến nghị Node 22+).

@@ -81,6 +81,8 @@ tạo nhóm, mở history có 55 tin, tải 50 + 5, reply, ACK, refresh không t
 Avatar có test validation/multipart; vẫn cần kiểm tra upload/delete storage thật với Django.
 Ngày 03/10 đã chạy 9 nhóm kiểm thử với MySQL + Mosquitto + Django local và cả hai worker thật,
 bao gồm endpoint tìm kiếm tin nhắn mới; không dùng Docker.
+Ngày 04/10 đã chạy lại toàn bộ: 18/18 test FE, production build, 21/21 test BE và
+9/9 nhóm smoke test đều thành công; các process local và hai worker đều hoạt động.
 Xem [hướng dẫn tích hợp thật](../integration/README.md). Môi trường triển khai/ACL của nhóm vẫn cần kiểm tra riêng.
 
 ### Fixture cô lập để kiểm tra FE
