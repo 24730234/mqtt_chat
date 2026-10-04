@@ -262,20 +262,15 @@ FE được triển khai trong `frontend/` bằng **React + Vite + MQTT.js**, đ
 `chat/views.py`, `config/urls.py` và `chat/mqtt_messages.py` tại BE commit `7dc68e8`.
 
 **Trạng thái:** đã có giao diện và adapter cho API/MQTT hiện có; đã build và kiểm thử
-<<<<<<< Updated upstream
-FE riêng. **Ngày 01/10 đã kiểm tra với Django + MySQL + Mosquitto local và cả hai worker thật**;
+FE riêng. **Ngày 03/10 đã kiểm tra với Django + MySQL + Mosquitto local và cả hai worker thật**;
 môi trường triển khai/ACL của nhóm vẫn cần nghiệm thu riêng.
 Không coi chức năng trong danh sách Features phía trên là đã hoàn thành toàn bộ.
-=======
-FE riêng. **Chưa nghiệm thu end-to-end với Django + MySQL + Mosquitto của nhóm**.
-Không coi các chức năng trong danh sách Tính năng phía trên là đã hoàn thành toàn bộ.
->>>>>>> Stashed changes
 
 ### Đã làm được
 
 | Hạng mục | Tiến độ FE | Ghi chú tích hợp |
 | --- | --- | --- |
-| Giao diện chat | Hoàn thành bản đầu | Tiếng Việt, responsive, tìm hội thoại/tin đã tải, draft riêng từng hội thoại |
+| Giao diện chat | Hoàn thành bản đầu | Tiếng Việt, responsive, tìm hội thoại/tin nhắn trên server, draft riêng từng hội thoại |
 | Demo riêng | Hoàn thành | Dữ liệu mẫu và phản hồi mẫu chỉ chạy trong chế độ demo |
 | Chọn/tạo người dùng | Đã nối API | Search username / POST user; đây **không phải đăng nhập** |
 | Hồ sơ | Đã nối API | PATCH username, short_bio (160 ký tự), bio, sex |
@@ -284,6 +279,7 @@ Không coi các chức năng trong danh sách Tính năng phía trên là đã h
 | Danh sách hội thoại | Tạm thời lưu cục bộ | Phân tách theo API base + user UUID; BE chưa có GET danh sách hội thoại |
 | Mở nhóm đã có | Đã làm phương án tạm | Nhập conversation UUID; kiểm tra quyền qua API history, không tự thêm thành viên |
 | Lịch sử | Đã nối API | 50 tin/lần, nút tải trước `before_seq`, xử lý 403/404/lỗi mạng |
+| Tìm tin nhắn | Đã nối API | Debounce 300 ms, gọi endpoint search mới, tối đa 50 kết quả mới nhất và hủy request cũ |
 | Gửi và nhận realtime | Đã nối MQTT WebSocket | QoS 1, publish command/send, subscribe message_accepted/error/message_created |
 | Reply | Đã nối hợp đồng BE | Gửi `reply_to_message_id`, hiển thị trích dẫn nếu tin gốc đã tải |
 | Xác nhận và chống trùng | Đã làm | Chờ ACK nghiệp vụ từ BE; ghép optimistic/ACK/broadcast/history, sắp theo server `seq` |
@@ -313,14 +309,58 @@ Không coi các chức năng trong danh sách Tính năng phía trên là đã h
 - Kiểm tra lại: **18/18 tests qua**, `npm run build` thành công; tìm `thien_fixture`, mở hội thoại mẫu và gửi tin nhận ACK trên trình duyệt.
 - Chưa nghiệm thu với backend thật của nhóm. Các mục còn chờ BE được liệt kê ở checklist integrate bên dưới.
 
-### Tích hợp backend thật ngày 01/10/2026
+### Tích hợp backend thật, cập nhật ngày 03/10/2026
 
-- Đã chạy `run_mqtt_worker` và `run_mqtt_presence` trong hai container riêng cùng Django, MySQL 8.4 và Mosquitto 2; log xác nhận subscribe đúng topic.
-- Đã qua **8 nhóm kiểm tra tích hợp thật**: user/nhóm, presence online/offline lưu DB, ACK và broadcast, retry chống trùng, history 50 + 5 tin/reply, quyền history 403, hồ sơ và upload/GET/xóa avatar.
+- Đã chạy trực tiếp `run_mqtt_worker` và `run_mqtt_presence` cùng Django, MySQL 8.4 và Mosquitto 2; log xác nhận subscribe đúng topic. Không dùng Docker.
+- Đã qua **9 nhóm kiểm tra tích hợp thật**: user/nhóm, presence online/offline lưu DB, ACK và broadcast, retry chống trùng, history 50 + 5 tin/reply, tìm kiếm server, quyền history 403, hồ sơ và upload/GET/xóa avatar.
 - Đã gửi tin trực tiếp từ FE qua broker thật và nhận xác nhận lưu MySQL; **18/18 unit tests FE + build** vẫn qua.
 - FE: `http://127.0.0.1:5173/?mode=live`, API base `/api`, MQTT `ws://127.0.0.1:9001`. User sau chạy smoke: `quang_live`, `thien_live`.
 - Cấu hình và hướng dẫn khởi động cả stack: [integration/README.md](integration/README.md). Không cần fixture cho luồng này.
 - Broker local chỉ mở cổng trên loopback, dùng anonymous cho phát triển. Chưa kiểm chứng ACL production, Last Will khi client chết đột ngột hoặc full offline sync.
+
+### Cập nhật theo backend ngày 03/10/2026
+
+- Đã đồng bộ commit BE `78f0fe7` và nối endpoint tìm kiếm tin nhắn
+  `GET /api/conversations/{conversation_id}/messages/search/` vào giao diện live.
+- Ô tìm kiếm dùng dữ liệu toàn bộ hội thoại từ server thay vì chỉ lọc các tin đang hiển thị;
+  request được debounce và request cũ bị hủy khi người dùng tiếp tục gõ.
+- Cấu hình database đọc được từ `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`
+  để chạy local thuận tiện mà không sửa mã nguồn.
+- Stack kiểm tra local chạy trực tiếp bằng Homebrew/Python/Node, không dùng Docker. Xem
+  [integration/README.md](integration/README.md).
+- Kiểm tra lại: **21/21 tests BE, 18/18 tests FE, production build và 9/9 nhóm smoke test đều qua**.
+
+### Rà soát toàn bộ và bàn giao FE ngày 04/10/2026
+
+Đã đồng bộ và kiểm tra lại `origin/main` tại commit `78f0fe7`. Nhánh FE hiện bao gồm:
+
+- Giao diện React/Vite responsive có demo riêng và live mode kết nối Django/MQTT thật.
+- Chọn/tạo user; chỉnh username, giới thiệu, giới tính và upload/xóa avatar.
+- Tìm user, xem/xóa bạn, gửi lời mời và phản hồi lời mời bằng UUID theo contract hiện có.
+- Tạo chat cá nhân/nhóm, mở hội thoại bằng UUID và lưu catalog riêng theo API/user trên trình duyệt.
+- Tải lịch sử 50 tin/trang, tải tin cũ, reply và xử lý lỗi quyền 403/không tồn tại 404.
+- Tìm toàn bộ tin nhắn của hội thoại qua endpoint server, debounce request và hủy request cũ.
+- Gửi/nhận realtime qua MQTT WebSocket; optimistic message, ACK nghiệp vụ, broadcast,
+  chống trùng, server sequence, timeout và retry giữ nguyên client message UUID.
+- Presence online/offline với retained Last Will; reconnect, resubscribe và tải lại lịch sử.
+- Cấu hình local không Docker cho MySQL 8.4, Mosquitto, Django, Vite cùng hai process
+  `run_mqtt_worker` và `run_mqtt_presence`.
+- Ghi rõ vai trò của bốn JetBrains Run Configuration do nhóm BE cung cấp: compound config
+  chỉ chạy Django và hai worker; UI vẫn chạy riêng theo `frontend/README.md`.
+
+Kết quả xác nhận lại ngày 04/10:
+
+- **21/21 test backend qua**, Django system check không có lỗi.
+- **18/18 test frontend qua** và Vite production build thành công.
+- **9/9 nhóm smoke test qua** với MySQL/Mosquitto thật: user/nhóm, presence, ACK/broadcast,
+  retry chống trùng, history 50 + 5/reply, tìm kiếm server, quyền 403, profile/avatar và offline.
+- Kiểm tra process xác nhận MySQL `3307`, Mosquitto TCP `1883`, WebSocket `9001`, Django
+  `8000`, Vite `5173` và cả hai MQTT worker đang chạy trực tiếp, không có Docker trong luồng này.
+- Giao diện live tải thành công tại `http://127.0.0.1:5173/?mode=live`.
+
+Các phần chưa hoàn thiện được phân loại FE/BE và mức ưu tiên trong
+[REVIEW_03-10-26.md](REVIEW_03-10-26.md). Ba việc cần phối hợp BE
+trước là xác thực HTTP/MQTT, API danh sách hội thoại và contract đồng bộ offline.
 
 ### Cách chạy FE
 
@@ -375,6 +415,7 @@ npm run build
 6. Chốt semantics presence khi cùng user mở nhiều tab: topic status hiện là một topic/user nên một tab ngắt có thể đánh dấu offline cho cả user.
 
 Chi tiết cấu trúc FE, cấu hình và fixture: [frontend/README.md](frontend/README.md).
+Báo cáo đầy đủ theo mức ưu tiên: [REVIEW_03-10-26.md](REVIEW_03-10-26.md).
 
 ## Các bước đề xuất tiếp theo
 

@@ -37,6 +37,11 @@ export function createApi(base = '/api', fetcher = fetch) {
       if (beforeSeq != null) params.set('before_seq', String(beforeSeq));
       return request(`/conversations/${encodeURIComponent(id)}/messages/?${params}`, { signal });
     },
+    searchMessages(id, userId, query, beforeSeq, signal) {
+      const params = new URLSearchParams({ user_id: userId, q: query, limit: '50' });
+      if (beforeSeq != null) params.set('before_seq', String(beforeSeq));
+      return request(`/conversations/${encodeURIComponent(id)}/messages/search/?${params}`, { signal });
+    },
     friends: (id) => request(`/users/${encodeURIComponent(id)}/friends/`),
     removeFriend: (id, peer) => request(`/users/${encodeURIComponent(id)}/friends/${encodeURIComponent(peer)}/`, { method: 'DELETE' }),
     invite: (sender_id, user_id) => request('/invitations/', { method: 'POST', body: { sender_id, user_id } }),

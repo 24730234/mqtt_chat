@@ -9,6 +9,8 @@ test('conversation and history requests follow Django field names and pagination
   await api.history('group', 'me', 51);
   assert.equal(calls[1][0], '/api/conversations/group/messages/?user_id=me&limit=50&before_seq=51');
   await api.searchUsers('a&b'); assert.equal(calls[2][0], '/api/users/search/?username=a%26b');
+  await api.searchMessages('group', 'me', 'ready & done', 30);
+  assert.equal(calls[3][0], '/api/conversations/group/messages/search/?user_id=me&q=ready+%26+done&limit=50&before_seq=30');
 });
 test('avatar validates size/type and uploads multipart field avatar without JSON content type', async () => {
   let request; const api = createApi('/api', async (url, options) => { request = { url, ...options }; return new Response('{}'); });
