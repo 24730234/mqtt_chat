@@ -168,10 +168,47 @@ class UserService:
     def list_friends(self, user_id):
         return self.users.friends(self._get_user(user_id))
 
+    def list_friends_page(
+        self, user_id, query="", online_only=False, cursor=None, limit=25
+    ):
+        user = self._get_user(user_id)
+        if not isinstance(query, str):
+            raise ServiceError("q must be a string")
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ServiceError("limit must be a positive integer") from exc
+        if limit < 1:
+            raise ServiceError("limit must be a positive integer")
+        limit = min(limit, 100)
+
+        after = None
+        if cursor is not None:
+            cursor_id = self._parse_id(cursor)
+            after = self.users.get(cursor_id) if cursor_id else None
+            if after is None or not self.users.are_friends(user, after):
+                raise ServiceError("cursor must identify one of this user's friends")
+
+        friends, total, online_total, has_more = self.users.friends_page(
+            user,
+            query=query.strip(),
+            online_only=online_only,
+            after=after,
+            limit=limit,
+        )
+        return {
+            "friends": friends,
+            "total": total,
+            "online_total": online_total,
+            "next_cursor": str(friends[-1].user_id) if has_more else None,
+        }
+
+    def list_invitations(self, user_id):
+        return self.invitations.list_for_user(self._get_user(user_id))
+
     def delete_friend(self, user_id, friend_id):
         user = self._get_user(user_id)
         friend = self._get_user(friend_id)
         if not self.users.are_friends(user, friend):
             raise NotFoundError("friendship not found")
         self.users.remove_friendship(user, friend)
-

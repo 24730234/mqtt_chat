@@ -37,8 +37,35 @@ class ChatService:
     def list_friends(self, user_id):
         return self.user_service.list_friends(user_id)
 
+    def list_friends_page(
+        self, user_id, query="", online_only=False, cursor=None, limit=25
+    ):
+        return self.user_service.list_friends_page(
+            user_id,
+            query=query,
+            online_only=online_only,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    def list_invitations(self, user_id):
+        return {
+            **self.user_service.list_invitations(user_id),
+            **self.conversation_service.list_room_invitations(user_id),
+        }
+
     def delete_friend(self, user_id, friend_id):
         return self.user_service.delete_friend(user_id, friend_id)
+
+    def send_room_invitation(self, sender_id, recipient_id, conversation_id):
+        return self.conversation_service.send_room_invitation(
+            sender_id, recipient_id, conversation_id
+        )
+
+    def respond_to_room_invitation(self, invitation_id, responder_id, status):
+        return self.conversation_service.respond_to_room_invitation(
+            invitation_id, responder_id, status
+        )
 
     def create_conversation(
         self,
@@ -55,6 +82,9 @@ class ChatService:
             usernames=usernames,
             name=name,
         )
+
+    def list_conversations(self, user_id):
+        return self.conversation_service.list_conversations(user_id)
 
     def load_history(self, conversation_id, user_id, before_seq=None, limit=50):
         return self.conversation_service.load_history(
@@ -89,4 +119,11 @@ class ChatService:
             client_message_id=client_message_id,
             content=content,
             reply_to_message_id=reply_to_message_id,
+        )
+
+    def mark_messages_read(self, user_id, conversation_id, message_ids):
+        return self.message_service.mark_messages_read(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_ids=message_ids,
         )

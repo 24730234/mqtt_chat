@@ -10,8 +10,10 @@ from .services import ChatService, ServiceError
 
 logger = logging.getLogger(__name__)
 SEND_MESSAGE_TOPIC = "chat/client/+/command/send"
+READ_MESSAGES_TOPIC = "chat/client/+/command/read"
 CLIENT_EVENT_TOPIC = "chat/client/{user_id}/event/{event}"
 CONVERSATION_MESSAGE_TOPIC = "chat/conversations/{conversation_id}/event/message_created"
+CONVERSATION_READ_TOPIC = "chat/conversations/{conversation_id}/event/message_read"
 
 
 class MessageCommandSubscriber:
@@ -29,7 +31,8 @@ class MessageCommandSubscriber:
             logger.error("MQTT message subscriber connection failed: %s", reason_code)
             return
         client.subscribe(SEND_MESSAGE_TOPIC, qos=1)
-        logger.info("Subscribed to MQTT message command topic %s", SEND_MESSAGE_TOPIC)
+        client.subscribe(READ_MESSAGES_TOPIC, qos=1)
+        logger.info("Subscribed to MQTT message command topics")
 
     @staticmethod
     def _publish(client, topic, payload):
@@ -50,10 +53,12 @@ class MessageCommandSubscriber:
 
     def on_message(self, client, userdata, message):
         topic_parts = message.topic.split("/")
+        is_send = topic_parts[3:] == ["command", "send"]
+        is_read = topic_parts[3:] == ["command", "read"]
         if (
             len(topic_parts) != 5
             or topic_parts[:2] != ["chat", "client"]
-            or topic_parts[3:] != ["command", "send"]
+            or not (is_send or is_read)
         ):
             logger.warning("Ignoring malformed MQTT message topic: %s", message.topic)
             return
@@ -61,7 +66,11 @@ class MessageCommandSubscriber:
         try:
             sender_id = uuid.UUID(topic_parts[2])
         except ValueError:
-            logger.warning("Ignoring MQTT send command with invalid user ID")
+            logger.warning("Ignoring MQTT command with invalid user ID")
+            return
+
+        if is_read:
+            self._handle_read(client, sender_id, message)
             return
 
         try:
@@ -143,6 +152,58 @@ class MessageCommandSubscriber:
                         if saved_message.reply_to_id
                         else None
                     ),
+                },
+            )
+
+    def _handle_read(self, client, user_id, message):
+        try:
+            payload = json.loads(message.payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._publish_error(client, user_id, None, "payload must be valid JSON")
+            return
+        if not isinstance(payload, dict):
+            self._publish_error(
+                client, user_id, None, "payload must be a JSON object"
+            )
+            return
+
+        close_old_connections()
+        try:
+            conversation, reader, read_ids = self.chat_service.mark_messages_read(
+                user_id=user_id,
+                conversation_id=payload.get("conversation_id"),
+                message_ids=payload.get("message_ids"),
+            )
+        except ServiceError as error:
+            error_reason = str(error)
+            conversation = None
+            reader = None
+            read_ids = []
+        except DatabaseError:
+            logger.exception("Could not persist read receipts for user %s", user_id)
+            error_reason = "read receipts could not be saved"
+            conversation = None
+            reader = None
+            read_ids = []
+        else:
+            error_reason = None
+        finally:
+            close_old_connections()
+
+        if error_reason is not None:
+            self._publish_error(client, user_id, None, error_reason)
+            return
+        if read_ids:
+            self._publish(
+                client,
+                CONVERSATION_READ_TOPIC.format(
+                    conversation_id=conversation.conversation_id
+                ),
+                {
+                    "type": "MESSAGE_READ",
+                    "conversation_id": str(conversation.conversation_id),
+                    "reader_id": str(reader.user_id),
+                    "message_ids": read_ids,
                 },
             )
 

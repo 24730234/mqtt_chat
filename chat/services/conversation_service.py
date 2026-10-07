@@ -1,17 +1,24 @@
 from ..db_connection import DatabaseConnection
-from ..models import Conversation, User
-from ..repositories import ConversationRepository, UserRepository
-from .errors import NotFoundError, PermissionError, ServiceError
+from ..models import Conversation, ConversationMember, RoomInvitation, User
+from ..repositories import (
+    ConversationRepository,
+    RoomInvitationRepository,
+    UserRepository,
+)
+from .errors import ConflictError, NotFoundError, PermissionError, ServiceError
 from .user_service import UserService
 
 
 class ConversationService:
     MAX_HISTORY_LIMIT = 100
 
-    def __init__(self, db=None, users=None, conversations=None):
+    def __init__(
+        self, db=None, users=None, conversations=None, room_invitations=None
+    ):
         self.db = db or DatabaseConnection()
         self.users = users or UserRepository()
         self.conversations = conversations or ConversationRepository()
+        self.room_invitations = room_invitations or RoomInvitationRepository()
 
     @staticmethod
     def _parse_id(value):
@@ -93,6 +100,60 @@ class ConversationService:
                 members,
                 name=name,
             )
+
+    def list_conversations(self, user_id):
+        user = self._get_user(user_id)
+        return self.conversations.list_for_user(user)
+
+    def send_room_invitation(self, sender_id, recipient_id, conversation_id):
+        sender = self._get_user(sender_id)
+        recipient = self._get_user(recipient_id)
+        parsed_conversation_id = self._parse_id(conversation_id)
+        if parsed_conversation_id is None:
+            raise NotFoundError("conversation not found")
+        if sender == recipient:
+            raise ServiceError("cannot invite yourself to a conversation")
+
+        with self.db.transaction():
+            conversation = self.conversations.get_for_update(parsed_conversation_id)
+            if conversation is None:
+                raise NotFoundError("conversation not found")
+            if conversation.conversation_type != Conversation.ConversationType.GROUP:
+                raise ServiceError("room invitations require a group conversation")
+            if not self.conversations.is_member(conversation, sender):
+                raise PermissionError("only a conversation member can send invitations")
+            if self.conversations.is_member(conversation, recipient):
+                raise ConflictError("user is already a member of this conversation")
+            if self.room_invitations.has_pending(conversation, recipient):
+                raise ConflictError("a pending room invitation already exists")
+            return self.room_invitations.create(conversation, sender, recipient)
+
+    def list_room_invitations(self, user_id):
+        return self.room_invitations.list_for_user(self._get_user(user_id))
+
+    def respond_to_room_invitation(self, invitation_id, responder_id, status):
+        parsed_invitation_id = self._parse_id(invitation_id)
+        responder = self._get_user(responder_id)
+        if status not in (
+            RoomInvitation.InvitationStatus.ACCEPT,
+            RoomInvitation.InvitationStatus.REJECT,
+        ):
+            raise ServiceError("status must be ACCEPT or REJECT")
+
+        with self.db.transaction():
+            invitation = self.room_invitations.get_for_update(parsed_invitation_id)
+            if invitation is None:
+                raise NotFoundError("room invitation not found")
+            if responder != invitation.user:
+                raise PermissionError("only the recipient can respond")
+            if invitation.status != RoomInvitation.InvitationStatus.PENDING:
+                raise ConflictError("invitation has already been handled")
+            if status == RoomInvitation.InvitationStatus.ACCEPT:
+                ConversationMember.objects.get_or_create(
+                    conversation=invitation.conversation,
+                    user=responder,
+                )
+            return self.room_invitations.save_status(invitation, status)
 
     def load_history(self, conversation_id, user_id, before_seq=None, limit=50):
         conversation = self._get_member_conversation(conversation_id, user_id)

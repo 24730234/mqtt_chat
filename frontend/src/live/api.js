@@ -32,6 +32,7 @@ export function createApi(base = '/api', fetcher = fetch) {
     },
     removeAvatar: (id) => request(`/users/${encodeURIComponent(id)}/avatar/`, { method: 'DELETE' }),
     createConversation: (body) => request('/conversations/', { method: 'POST', body }),
+    listConversations: (userId) => request(`/users/${encodeURIComponent(userId)}/conversations/`),
     history(id, userId, beforeSeq, signal) {
       const params = new URLSearchParams({ user_id: userId, limit: '50' });
       if (beforeSeq != null) params.set('before_seq', String(beforeSeq));
@@ -42,10 +43,25 @@ export function createApi(base = '/api', fetcher = fetch) {
       if (beforeSeq != null) params.set('before_seq', String(beforeSeq));
       return request(`/conversations/${encodeURIComponent(id)}/messages/search/?${params}`, { signal });
     },
-    friends: (id) => request(`/users/${encodeURIComponent(id)}/friends/`),
+    friends(id, { query = '', onlineOnly = false, cursor = null, limit = 25, signal } = {}) {
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (query) params.set('q', query);
+      if (onlineOnly) params.set('online', 'true');
+      if (cursor) params.set('cursor', cursor);
+      return request(`/users/${encodeURIComponent(id)}/friends/?${params}`, { signal });
+    },
+    invitations: (id, signal) => request(`/users/${encodeURIComponent(id)}/invitations/`, { signal }),
     removeFriend: (id, peer) => request(`/users/${encodeURIComponent(id)}/friends/${encodeURIComponent(peer)}/`, { method: 'DELETE' }),
     invite: (sender_id, user_id) => request('/invitations/', { method: 'POST', body: { sender_id, user_id } }),
     respond: (id, user_id, status) => request(`/invitations/${encodeURIComponent(id)}/respond/`, { method: 'POST', body: { user_id, status } }),
+    inviteRoom: (sender_id, user_id, conversation_id) => request('/room-invitations/', {
+      method: 'POST',
+      body: { sender_id, user_id, conversation_id },
+    }),
+    respondRoom: (id, user_id, status) => request(`/room-invitations/${encodeURIComponent(id)}/respond/`, {
+      method: 'POST',
+      body: { user_id, status },
+    }),
   };
 }
 export function validateAvatar(file) {

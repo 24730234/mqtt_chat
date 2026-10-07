@@ -12,6 +12,40 @@ test('conversation and history requests follow Django field names and pagination
   await api.searchMessages('group', 'me', 'ready & done', 30);
   assert.equal(calls[3][0], '/api/conversations/group/messages/search/?user_id=me&q=ready+%26+done&limit=50&before_seq=30');
 });
+test('list conversations requests the user conversation catalog', async () => {
+  let requestUrl;
+  const api = createApi('/api', async url => { requestUrl = url; return new Response('{"conversations":[]}'); });
+  assert.deepEqual(await api.listConversations('user/id'), { conversations: [] });
+  assert.equal(requestUrl, '/api/users/user%2Fid/conversations/');
+});
+test('friends API sends keyset paging, search and online filters', async () => {
+  let requestUrl;
+  const api = createApi('/api', async url => { requestUrl = url; return new Response('{"friends":[]}'); });
+  await api.friends('me', { query: 'maker', onlineOnly: true, cursor: 'next-id', limit: 20 });
+  assert.equal(requestUrl, '/api/users/me/friends/?limit=20&q=maker&online=true&cursor=next-id');
+});
+test('invitations API loads incoming and sent requests', async () => {
+  let requestUrl;
+  const payload = { incoming: [], sent: [] };
+  const api = createApi('/api', async url => { requestUrl = url; return new Response(JSON.stringify(payload)); });
+  assert.deepEqual(await api.invitations('me'), payload);
+  assert.equal(requestUrl, '/api/users/me/invitations/');
+});
+test('room invitation API creates and responds to group invitations', async () => {
+  const calls = [];
+  const api = createApi('/api', async (url, options) => {
+    calls.push([url, options]);
+    return new Response('{}', { status: url === '/api/room-invitations/' ? 201 : 200 });
+  });
+  await api.inviteRoom('sender', 'recipient', 'group');
+  assert.equal(calls[0][0], '/api/room-invitations/');
+  assert.deepEqual(JSON.parse(calls[0][1].body), {
+    sender_id: 'sender', user_id: 'recipient', conversation_id: 'group',
+  });
+  await api.respondRoom('invite', 'recipient', 'ACCEPT');
+  assert.equal(calls[1][0], '/api/room-invitations/invite/respond/');
+  assert.deepEqual(JSON.parse(calls[1][1].body), { user_id: 'recipient', status: 'ACCEPT' });
+});
 test('avatar validates size/type and uploads multipart field avatar without JSON content type', async () => {
   let request; const api = createApi('/api', async (url, options) => { request = { url, ...options }; return new Response('{}'); });
   assert.throws(() => validateAvatar({ size: 5*1024*1024+1, type: 'image/png' }), /5 MB/);

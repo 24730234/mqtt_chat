@@ -1,4 +1,3 @@
-// Only topics implemented by backend commit 7dc68e8. No invented read/sync/typing events.
 import { messageCommand, validUuid } from './state.js';
 export function createTransport({ connect, url, userId, username, password, onState, onEvent, onReady, onPresence, ackTimeout = 15000 }) {
   if (!/^wss?:\/\//.test(url)) throw new Error('Trình duyệt cần địa chỉ MQTT ws:// hoặc wss://.');
@@ -9,6 +8,7 @@ export function createTransport({ connect, url, userId, username, password, onSt
   let subscriptionVersion = 0;
   let notifyReady = false;
   const watched = new Map();
+  const presenceWatched = new Set();
   const pending = new Map();
   const client = connect(url, {
     clientId: `mach-${crypto.randomUUID()}`, clean: true, reconnectPeriod: 2000, connectTimeout: 10000,
@@ -17,10 +17,25 @@ export function createTransport({ connect, url, userId, username, password, onSt
     will: { topic: statusTopic, payload: 'offline', qos: 1, retain: true },
   });
   function update(state, error = '') { if (!stopped) onState(state, error); }
+  function presenceUserIds() {
+    return new Set([...presenceWatched, ...[...watched.values()].flat()]);
+  }
   function topics() {
     return [...new Set([`chat/client/${userId}/event/message_accepted`, `chat/client/${userId}/event/error`,
       ...[...watched.keys()].map(id => `chat/conversations/${id}/event/message_created`),
-      ...[...watched.values()].flat().map(id => `chat/users/${id}/status`)])];
+      ...[...watched.keys()].map(id => `chat/conversations/${id}/event/message_read`),
+      ...[...presenceUserIds()].map(id => `chat/users/${id}/status`)])];
+  }
+  function updateSubscriptions(previousTopics) {
+    const currentTopics = topics();
+    const currentSet = new Set(currentTopics);
+    const removed = previousTopics.filter(topic => !currentSet.has(topic));
+    if (client.connected && removed.length) {
+      client.unsubscribe(removed, error => { if (error) update('error', error.message); });
+    }
+    if (client.connected && previousTopics.join('\n') !== currentTopics.join('\n')) {
+      synchronize();
+    }
   }
   function synchronize() {
     const version = ++subscriptionVersion;
@@ -48,16 +63,18 @@ export function createTransport({ connect, url, userId, username, password, onSt
     if (stopped) return;
     const text = bytes.toString();
     const presence = /^chat\/users\/([^/]+)\/status$/.exec(topic);
-    if (presence && [...watched.values()].flat().includes(presence[1]) && ['online', 'offline'].includes(text)) { onPresence?.(presence[1], text); return; }
+    if (presence && presenceUserIds().has(presence[1]) && ['online', 'offline'].includes(text)) { onPresence?.(presence[1], text); return; }
     let event;
     try { event = JSON.parse(text); } catch { return; }
     if (!event || typeof event !== 'object') return;
     const isAccepted = topic === `chat/client/${userId}/event/message_accepted` && event.type === 'MESSAGE_ACCEPTED';
     const isError = topic === `chat/client/${userId}/event/error` && event.type === 'ERROR';
     const isCreated = watched.has(event.conversation_id) && topic === `chat/conversations/${event.conversation_id}/event/message_created` && event.type === 'MESSAGE_CREATED';
-    if (!(isAccepted || isError || isCreated)) return;
+    const isRead = watched.has(event.conversation_id) && topic === `chat/conversations/${event.conversation_id}/event/message_read` && event.type === 'MESSAGE_READ';
+    if (!(isAccepted || isError || isCreated || isRead)) return;
     if ((isAccepted || isCreated) && (!validUuid(event.message_id) || !validUuid(event.conversation_id) || !validUuid(event.client_message_id) || !Number.isSafeInteger(event.seq) || event.seq < 1 || !Number.isFinite(Date.parse(event.created_at)))) return;
     if (isCreated && (!validUuid(event.sender_id) || typeof event.content !== 'string')) return;
+    if (isRead && (!validUuid(event.reader_id) || !Array.isArray(event.message_ids) || !event.message_ids.length || event.message_ids.some(id => !validUuid(id)))) return;
     const own = isAccepted || isError || isCreated && event.sender_id === userId;
     if (own && event.client_message_id) {
       const entry = pending.get(event.client_message_id);
@@ -69,21 +86,25 @@ export function createTransport({ connect, url, userId, username, password, onSt
   });
   update('connecting');
   return {
+    isReady() { return ready && client.connected; },
+    isWatching(conversationId) { return watched.has(conversationId); },
     watch(conversationId, memberIds = []) {
       if (!validUuid(conversationId)) throw new Error('Conversation ID không hợp lệ.');
-      const previous = topics().join('\n');
+      const previous = topics();
       watched.set(conversationId, memberIds.filter(validUuid));
-      if (client.connected && (previous !== topics().join('\n') || !ready)) synchronize();
+      if (client.connected && previous.join('\n') === topics().join('\n') && !ready) synchronize();
+      else updateSubscriptions(previous);
     },
     unwatch(conversationId) {
       const previous = topics();
       watched.delete(conversationId);
-      const remaining = new Set(topics());
-      const removed = previous.filter(topic => !remaining.has(topic));
-      if (client.connected && removed.length) {
-        client.unsubscribe(removed, error => { if (error) update('error', error.message); });
-        synchronize();
-      }
+      updateSubscriptions(previous);
+    },
+    watchPresence(userIds = []) {
+      const previous = topics();
+      presenceWatched.clear();
+      userIds.filter(validUuid).forEach(id => presenceWatched.add(id));
+      updateSubscriptions(previous);
     },
     send(message) {
       if (!ready || !client.connected) throw new Error('MQTT chưa sẵn sàng. Hãy đợi kết nối rồi gửi lại.');
@@ -97,6 +118,18 @@ export function createTransport({ connect, url, userId, username, password, onSt
       pending.set(command.client_message_id, { conversationId: command.conversation_id, timer: setTimeout(() => failed('Chưa nhận xác nhận từ BE. Có thể tin đã được lưu; gửi lại dùng cùng mã để tránh trùng.'), ackTimeout) });
       // MQTT PUBACK is not database confirmation; wait for MESSAGE_ACCEPTED / own MESSAGE_CREATED.
       client.publish(`chat/client/${userId}/command/send`, JSON.stringify(command), { qos: 1, retain: false }, error => { if (error) failed(error.message); });
+    },
+    markRead(conversationId, messageIds) {
+      if (!ready || !client.connected) throw new Error('MQTT chưa sẵn sàng để đồng bộ trạng thái đã đọc.');
+      if (!watched.has(conversationId) || !validUuid(conversationId)) throw new Error('Hội thoại chưa được đăng ký nhận tin nhắn.');
+      const ids = [...new Set(messageIds)].filter(validUuid).slice(0, 100);
+      if (!ids.length) return;
+      client.publish(`chat/client/${userId}/command/read`, JSON.stringify({
+        conversation_id: conversationId,
+        message_ids: ids,
+      }), { qos: 1, retain: false }, error => {
+        if (error) update('error', error.message);
+      });
     },
     close() {
       stopped = true; ready = false;

@@ -1,0 +1,19 @@
+.conversation.unread {
+  background: #f0f6e9;
+}
+
+.conversation.unread .conversation-top strong,
+.conversation.unread .conversation-preview > span {
+  color: #36583b;
+  font-weight: 650;
+}
+
+.conversation.unread .unread-count {
+  min-width: 20px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #668b50;
+  color: #fff;
+  font-size: 9px;
+  text-align: center;
+}

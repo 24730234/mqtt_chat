@@ -52,7 +52,7 @@ Trang HTTPS cần `wss://` để tránh mixed content.
 - `src/live/LiveApp.jsx`: chọn user, workspace chat, profile/avatar, bạn bè, tạo/mở hội thoại.
 - `src/live/api.js`: HTTP API adapter, validation avatar, lỗi mạng/HTTP.
 - `src/live/transport.js`: MQTT topics, ACK nghiệp vụ, timeout, retry, presence, reconnect.
-- `src/live/state.js`: chuẩn hóa history, merge/ordering/dedup, catalog tách theo API/user.
+- `src/live/state.js`: chuẩn hóa history, merge/ordering/dedup.
 - `tests/*.test.js`: các ca logic và contract có hồi quy cần kiểm tra.
 
 ## Các quyết định theo contract hiện tại
@@ -61,9 +61,12 @@ Trang HTTPS cần `wss://` để tránh mixed content.
 - MQTT PUBACK không chứng minh BE đã lưu. UI chờ `MESSAGE_ACCEPTED` hoặc broadcast của chính tin đó.
 - Retry dùng nguyên UUID/nội dung/reply target. Tin timeout có thể đã lưu; retry phải idempotent.
 - Receipt READ/DELIVERED không có API/topic chính thức nên không giả lập trong live.
-- Catalog chỉ chứa hội thoại đã mở/tạo trên trình duyệt. BE chưa có GET danh sách/chi tiết.
-- Mở bằng UUID kiểm tra membership bằng history. Không tự join. Khi không có metadata,
-  chỉ biết các tác giả từ trang history, không suy diễn thành toàn bộ thành viên.
+- Live tải danh sách hội thoại đầy đủ từ `GET /api/users/{user_id}/conversations/`,
+  bao gồm thành viên và tin nhắn cuối cùng; danh sách được sắp xếp theo hoạt động mới nhất.
+- Mục Bạn bè dùng phân trang keyset theo cuộn, tìm kiếm trên máy chủ và lọc bạn bè online;
+  mục Lời mời quản lý lời mời kết bạn/nhóm đến và đã gửi, chấp nhận hoặc từ chối lời mời đến.
+- Mở bằng UUID kiểm tra membership bằng history rồi tải metadata hội thoại từ danh sách
+  máy chủ. Không tự join hội thoại.
 - Reconnect resubscribe và fetch trang 50 tin mới nhất; người dùng bấm tải cũ hơn nếu cần.
   Chưa có outbox offline hoặc đảm bảo đồng bộ mọi khoảng trống; BE còn thiếu sync contract.
 - Drafts/pending messages chỉ trong bộ nhớ phiên; reload/đổi tài khoản sẽ mất.

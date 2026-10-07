@@ -33,6 +33,21 @@ urlpatterns = [
     ),
     path("api/users/<uuid:user_id>/friends/", views.list_friends, name="list-friends"),
     path(
+        "api/users/<uuid:user_id>/invitations/",
+        views.list_invitations,
+        name="list-invitations",
+    ),
+    path(
+        "api/room-invitations/",
+        views.send_room_invitation,
+        name="send-room-invitation",
+    ),
+    path(
+        "api/room-invitations/<uuid:invitation_id>/respond/",
+        views.respond_to_room_invitation,
+        name="respond-to-room-invitation",
+    ),
+    path(
         "api/users/<uuid:user_id>/friends/<uuid:friend_id>/",
         views.delete_friend,
         name="delete-friend",
@@ -44,6 +59,11 @@ urlpatterns = [
         name="respond-to-invitation",
     ),
     path("api/conversations/", views.create_conversation, name="create-conversation"),
+    path(
+        "api/users/<uuid:user_id>/conversations/",
+        views.list_conversations,
+        name="list-user-conversations",
+    ),
     path(
         "api/conversations/<uuid:conversation_id>/messages/search/",
         views.search_messages,

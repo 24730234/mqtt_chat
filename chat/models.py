@@ -212,6 +212,58 @@ class ConversationMember(models.Model):
         return f"{self.user} in {self.conversation}"
 
 
+class RoomInvitation(models.Model):
+    class InvitationStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        ACCEPT = "ACCEPT", "Accepted"
+        REJECT = "REJECT", "Rejected"
+
+    invitation_id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        db_column="id",
+    )
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        db_column="conversation_id",
+        related_name="room_invitations",
+    )
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        db_column="sender_id",
+        related_name="sent_room_invitations",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        db_column="user_id",
+        related_name="received_room_invitations",
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=InvitationStatus.choices,
+        default=InvitationStatus.PENDING,
+        db_column="status",
+    )
+    send_time = models.DateTimeField(auto_now_add=True, db_column="send_time")
+
+    class Meta:
+        db_table = "room_invitations"
+        indexes = [
+            models.Index(
+                fields=["user", "status", "send_time"],
+                name="idx_room_inv_user_status_time",
+            ),
+            models.Index(fields=["sender", "status"], name="idx_room_inv_sender_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.sender} -> {self.user} in {self.conversation}: {self.status}"
+
+
 class Message(models.Model):
     message_id = models.UUIDField(
         primary_key=True,

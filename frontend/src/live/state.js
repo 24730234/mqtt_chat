@@ -27,12 +27,3 @@ export function reconcileAccepted(messages, accepted, userId) {
 export function messageCommand(message) {
   return { conversation_id: message.conversation_id, client_message_id: message.client_message_id, content: message.content, reply_to_message_id: message.reply_to_message_id || null };
 }
-export function readCatalog(apiBase, userId, storage = localStorage) {
-  try {
-    const list = JSON.parse(storage.getItem(`mach-live-catalog:${apiBase}:${userId}`) || '[]');
-    return Array.isArray(list) ? list.filter(c => validUuid(c.conversation_id) && Array.isArray(c.members)) : [];
-  } catch { return []; }
-}
-export function saveCatalog(apiBase, userId, conversations, storage = localStorage) {
-  try { storage.setItem(`mach-live-catalog:${apiBase}:${userId}`, JSON.stringify(conversations)); return true; } catch { return false; }
-}

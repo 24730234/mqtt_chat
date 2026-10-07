@@ -39,6 +39,59 @@ test('reject malformed events, handle peer presence and reconnect resubscription
   t.client.emit('offline'); assert.throws(() => t.transport.send(message), /chưa sẵn sàng/);
   const n = t.client.subscriptions.length; t.client.emit('connect'); assert.ok(t.client.subscriptions.length > n); t.transport.close();
 });
+test('friend presence subscriptions receive retained live status and unsubscribe when friends view closes', () => {
+  const t = setup();
+  t.transport.watchPresence([uid]);
+  t.client.emit('connect');
+  const topic = `chat/users/${uid}/status`;
+  assert.ok(t.client.subscriptions.flat().includes(topic));
+
+  t.client.emit('message', topic, Buffer.from('online'));
+  assert.deepEqual(t.presence, [[uid, 'online']]);
+  t.transport.watchPresence([]);
+  assert.ok(t.client.unsubscribed.includes(topic));
+
+  t.client.emit('message', topic, Buffer.from('offline'));
+  assert.deepEqual(t.presence, [[uid, 'online']]);
+  t.transport.close();
+});
+test('read commands publish only watched message IDs and accept valid read events', () => {
+  const t = setup();
+  t.transport.watch(cid, [uid]);
+  t.client.emit('connect');
+  const readTopic = `chat/conversations/${cid}/event/message_read`;
+  assert.ok(t.client.subscriptions.flat().includes(readTopic));
+  t.transport.markRead(cid, [mid, mid, 'bad-id']);
+  const command = t.client.publications.find(p => p.topic === `chat/client/${uid}/command/read`);
+  assert.deepEqual(JSON.parse(command.payload), {
+    conversation_id: cid,
+    message_ids: [mid],
+  });
+
+  const event = {
+    type: 'MESSAGE_READ',
+    conversation_id: cid,
+    reader_id: uid,
+    message_ids: [mid],
+  };
+  t.client.emit('message', readTopic, Buffer.from(JSON.stringify(event)));
+  assert.deepEqual(t.events, [event]);
+  t.client.emit('message', readTopic, Buffer.from(JSON.stringify({ ...event, reader_id: 'invalid' })));
+  assert.equal(t.events.length, 1);
+  t.transport.close();
+});
+test('friend presence subscription preserves status topics shared with a conversation watch', () => {
+  const t = setup();
+  t.transport.watch(cid, [uid]);
+  t.transport.watchPresence([uid]);
+  t.client.emit('connect');
+  t.transport.watchPresence([]);
+
+  assert.equal(t.client.unsubscribed, undefined);
+  t.client.emit('message', `chat/users/${uid}/status`, Buffer.from('online'));
+  assert.deepEqual(t.presence, [[uid, 'online']]);
+  t.transport.close();
+});
 test('subscription denial does not advertise connected; invalid browser protocol rejected', () => {
   const t = setup(); t.client.rejected = true; t.client.emit('connect'); assert.equal(t.states.at(-1)[0], 'error'); assert.throws(() => t.transport.send(message), /chưa sẵn sàng/); t.transport.close();
   assert.throws(() => setup({ url: 'mqtt://localhost:1883' }), /ws/);
@@ -49,7 +102,10 @@ test('unwatch removes denied conversation topic, retains shared presence, ignore
   const second = '44444444-4444-4444-8444-444444444444';
   t.transport.watch(cid, [uid]); t.transport.watch(second, [uid]); t.client.emit('connect');
   t.transport.unwatch(cid);
-  assert.deepEqual(t.client.unsubscribed, [`chat/conversations/${cid}/event/message_created`]);
+  assert.deepEqual(t.client.unsubscribed, [
+    `chat/conversations/${cid}/event/message_created`,
+    `chat/conversations/${cid}/event/message_read`,
+  ]);
   t.client.emit('message', `chat/conversations/${cid}/event/message_created`, Buffer.from(JSON.stringify({ ...accepted, type: 'MESSAGE_CREATED', sender_id: uid, content: 'late' })));
   assert.equal(t.events.length, 0);
   t.transport.unwatch(second);

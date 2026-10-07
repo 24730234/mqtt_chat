@@ -13,6 +13,8 @@ from .user_service import UserService
 
 
 class MessageService:
+    MAX_READ_BATCH = 100
+
     def __init__(self, db=None, users=None, conversations=None, messages=None):
         self.db = db or DatabaseConnection()
         self.users = users or UserRepository()
@@ -98,8 +100,7 @@ class MessageService:
                         "sender is not a member of this conversation"
                     )
 
-                # Recheck after taking the conversation lock: retries in this
-                # conversation must not allocate another sequence number.
+                # Recheck under the conversation lock before allocating a sequence.
                 existing = self.messages.get_by_sender_and_client_id(
                     sender, client_message_id
                 )
@@ -131,8 +132,6 @@ class MessageService:
                 )
             return message, True
         except IntegrityError:
-            # A simultaneous retry from a different conversation can race on
-            # the globally unique (sender, client_message_id) constraint.
             existing = self.messages.get_by_sender_and_client_id(
                 sender, client_message_id
             )
@@ -144,3 +143,29 @@ class MessageService:
                 content,
                 reply_to_id,
             )
+
+    def mark_messages_read(self, user_id, conversation_id, message_ids):
+        user = self._get_sender(user_id)
+        conversation_id = self._parse_uuid(conversation_id, "conversation_id")
+        if not isinstance(message_ids, list) or not message_ids:
+            raise ServiceError("message_ids must be a non-empty list")
+        if len(message_ids) > self.MAX_READ_BATCH:
+            raise ServiceError(
+                f"message_ids must contain at most {self.MAX_READ_BATCH} items"
+            )
+        parsed_ids = list(
+            dict.fromkeys(
+                self._parse_uuid(message_id, "message_id")
+                for message_id in message_ids
+            )
+        )
+
+        conversation = self.conversations.get(conversation_id)
+        if conversation is None:
+            raise NotFoundError("conversation not found")
+        if not self.conversations.is_member(conversation, user):
+            raise PermissionError("user is not a member of this conversation")
+
+        with self.db.transaction():
+            read_ids = self.messages.mark_read(conversation, user, parsed_ids)
+        return conversation, user, read_ids
