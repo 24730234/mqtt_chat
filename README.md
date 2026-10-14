@@ -277,8 +277,15 @@ Người gửi nhận sự kiện `MESSAGE_ACCEPTED` tại
 `chat/client/{user_id}/event/message_accepted`, hoặc `ERROR` tại
 `chat/client/{user_id}/event/error`. Tin nhắn mới được broadcast sau khi commit
 cơ sở dữ liệu tại `chat/conversations/{conversation_id}/event/message_created`.
+Mỗi thành viên khác trong hội thoại nhận một thông báo `MESSAGE_CREATED` trên inbox
+riêng `chat/client/{user_id}/event/message_created`. Thông báo gồm `sender_id`,
+`conversation_id`, `message_id`, `seq` và `created_at` (không gồm nội dung tin).
+Nếu hội thoại chưa có trong catalog, client tải lại danh sách và history rồi bắt
+đầu subscribe topic tin nhắn của hội thoại.
+
 Cấu hình xác thực và ACL của Mosquitto để client chỉ được publish command dưới
-user ID của chính mình và chỉ subscribe các event topic được cấp quyền.
+user ID của chính mình và chỉ subscribe event topic có cùng user ID hoặc các topic
+hội thoại mà họ là thành viên.
 
 Frontend gửi `command/read` theo batch cho các tin nhắn của thành viên khác thực
 sự đi vào vùng nhìn thấy trong cửa sổ chat (tối đa 100 ID mỗi batch):

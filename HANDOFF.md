@@ -100,9 +100,10 @@ Các phần chưa hoàn thiện tại mốc rà soát này được phân loại
 - **Đã xem / chưa xem được lưu bền vững:** dùng model `MessageReceipt` hiện có, không cần migration. Backend chỉ ghi nhận đã đọc cho tin của thành viên khác trong đúng hội thoại; yêu cầu đọc có thể gửi lặp an toàn.
 - **Đọc theo vùng nhìn thấy:** frontend dùng `IntersectionObserver` để gửi batch ID khi tin nhắn đi vào vùng nhìn thấy, không đánh dấu toàn bộ hội thoại chỉ vì người dùng mở chat.
 - **Đồng bộ realtime và khi tải lại:** worker MQTT nhận `chat/client/{user_id}/command/read`, broadcast `MESSAGE_READ` trên `chat/conversations/{conversation_id}/event/message_read`; history trả `read_by`, conversation catalog trả `unread_count`. Giao diện cập nhật trạng thái “Chưa xem/Đã xem”, badge và bộ lọc hội thoại chưa đọc.
+- **Nhận hội thoại mới realtime:** sau khi có tin nhắn mới, worker gửi một thông báo `MESSAGE_CREATED` tới inbox riêng của từng thành viên khác. Payload gồm `sender_id` và metadata hội thoại/tin nhắn; nếu conversation chưa có trong catalog, FE tải lại danh sách và history để bắt đầu theo dõi message topic.
 - **Friends và Invitations:** sidebar thông tin bên phải có thể thu gọn/mở rộng để dành thêm chiều rộng cho nội dung; nút vẫn hiển thị khi thu gọn và dùng được trên màn hình nhỏ.
 - **Presence cần nghiệm thu thêm:** mỗi browser là MQTT client riêng; các browser cần cùng broker và client nhận cần subscribe topic `chat/users/{user_id}/status`. Chưa xác nhận được nguyên nhân lệch trạng thái giữa hai browser; nhãn “MQTT đã kết nối” chưa chứng minh đã nhận đúng presence topic.
-- **Kiểm tra sau cập nhật:** 31/31 Django tests, 24/24 frontend tests, Django system check và Vite production build thành công; không phát sinh migration.
+- **Kiểm tra sau cập nhật:** 31 Django tests, 25 frontend tests, Django system check và Vite production build thành công; không phát sinh migration.
 
 ## Kiểm thử FE
 

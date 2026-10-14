@@ -116,6 +116,9 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
   const transport = useRef(null);
   const alive = useRef(false);
   const catalogRef = useRef(conversations);
+  const refreshCatalogRef = useRef(null);
+  const catalogRefreshInFlight = useRef(false);
+  const catalogRefreshQueued = useRef(false);
   const activeRef = useRef(active);
   const list = useRef(null);
   const shouldScroll = useRef(false);
@@ -212,10 +215,14 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
           if (state === 'connected') flushReadQueue();
         },
         onPresence: (id, status) => setPresence(prev => ({ ...prev, [id]: status })),
-        onReady: () => { flushReadQueue(); refreshConversationCatalog(); },
+        onReady: () => { flushReadQueue(); refreshCatalogRef.current?.(); },
         onEvent: event => {
           if (event.type === 'MESSAGE_ACCEPTED') setMessages(prev => reconcileAccepted(prev, event, user.user_id));
-          else if (event.type === 'MESSAGE_CREATED') {
+          else if (event.type === 'MESSAGE_CREATED' && event.notification_only) {
+            if (!catalogRef.current.some(conversation => conversation.conversation_id === event.conversation_id)) {
+              refreshCatalogRef.current?.();
+            }
+          } else if (event.type === 'MESSAGE_CREATED') {
             const own = event.sender_id === user.user_id;
             const conversation = catalogRef.current.find(c => c.conversation_id === event.conversation_id);
             const messageSender = conversation?.members.find(member => member.user_id === event.sender_id);
@@ -349,6 +356,11 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
       .catch(error => setError(error.message));
   }
   function refreshConversationCatalog() {
+    if (catalogRefreshInFlight.current) {
+      catalogRefreshQueued.current = true;
+      return;
+    }
+    catalogRefreshInFlight.current = true;
     api.listConversations(user.user_id)
       .then(result => {
         const refreshed = sortConversations(result.conversations.map(conversation => ({
@@ -359,8 +371,16 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
         merge(normalizeConversationLastMessages(refreshed));
         refreshed.forEach(conversation => loadHistory(conversation));
       })
-      .catch(error => setError(error.message));
+      .catch(error => setError(error.message))
+      .finally(() => {
+        catalogRefreshInFlight.current = false;
+        if (catalogRefreshQueued.current) {
+          catalogRefreshQueued.current = false;
+          refreshConversationCatalog();
+        }
+      });
   }
+  refreshCatalogRef.current = refreshConversationCatalog;
   function editDraft(part) { setDrafts(prev => ({ ...prev, [active]: { ...(prev[active] || { text: '', reply: null }), ...part } })); }
   function publish(message) {
     merge([{ ...message, status: 'PENDING', error: undefined }]);

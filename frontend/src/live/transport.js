@@ -22,6 +22,7 @@ export function createTransport({ connect, url, userId, username, password, onSt
   }
   function topics() {
     return [...new Set([`chat/client/${userId}/event/message_accepted`, `chat/client/${userId}/event/error`,
+      `chat/client/${userId}/event/message_created`,
       ...[...watched.keys()].map(id => `chat/conversations/${id}/event/message_created`),
       ...[...watched.keys()].map(id => `chat/conversations/${id}/event/message_read`),
       ...[...presenceUserIds()].map(id => `chat/users/${id}/status`)])];
@@ -69,10 +70,16 @@ export function createTransport({ connect, url, userId, username, password, onSt
     if (!event || typeof event !== 'object') return;
     const isAccepted = topic === `chat/client/${userId}/event/message_accepted` && event.type === 'MESSAGE_ACCEPTED';
     const isError = topic === `chat/client/${userId}/event/error` && event.type === 'ERROR';
+    const isInboxMessage = topic === `chat/client/${userId}/event/message_created` &&
+      event.type === 'MESSAGE_CREATED' && event.notification_only === true;
     const isCreated = watched.has(event.conversation_id) && topic === `chat/conversations/${event.conversation_id}/event/message_created` && event.type === 'MESSAGE_CREATED';
     const isRead = watched.has(event.conversation_id) && topic === `chat/conversations/${event.conversation_id}/event/message_read` && event.type === 'MESSAGE_READ';
-    if (!(isAccepted || isError || isCreated || isRead)) return;
+    if (!(isAccepted || isError || isInboxMessage || isCreated || isRead)) return;
     if ((isAccepted || isCreated) && (!validUuid(event.message_id) || !validUuid(event.conversation_id) || !validUuid(event.client_message_id) || !Number.isSafeInteger(event.seq) || event.seq < 1 || !Number.isFinite(Date.parse(event.created_at)))) return;
+    if (isInboxMessage && (!validUuid(event.message_id) || !validUuid(event.conversation_id) ||
+      !validUuid(event.sender_id) || event.sender_id === userId ||
+      !Number.isSafeInteger(event.seq) || event.seq < 1 ||
+      !Number.isFinite(Date.parse(event.created_at)))) return;
     if (isCreated && (!validUuid(event.sender_id) || typeof event.content !== 'string')) return;
     if (isRead && (!validUuid(event.reader_id) || !Array.isArray(event.message_ids) || !event.message_ids.length || event.message_ids.some(id => !validUuid(id)))) return;
     const own = isAccepted || isError || isCreated && event.sender_id === userId;

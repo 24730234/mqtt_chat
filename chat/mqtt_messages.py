@@ -14,6 +14,7 @@ READ_MESSAGES_TOPIC = "chat/client/+/command/read"
 CLIENT_EVENT_TOPIC = "chat/client/{user_id}/event/{event}"
 CONVERSATION_MESSAGE_TOPIC = "chat/conversations/{conversation_id}/event/message_created"
 CONVERSATION_READ_TOPIC = "chat/conversations/{conversation_id}/event/message_read"
+CLIENT_MESSAGE_CREATED_TOPIC = "chat/client/{user_id}/event/message_created"
 
 
 class MessageCommandSubscriber:
@@ -103,15 +104,25 @@ class MessageCommandSubscriber:
                 content=payload.get("content"),
                 reply_to_message_id=payload.get("reply_to_message_id"),
             )
+            conversation_member_ids = (
+                list(
+                    saved_message.conversation.members.exclude(user_id=sender_id)
+                    .values_list("user_id", flat=True)
+                )
+                if created
+                else []
+            )
         except ServiceError as error:
             error_reason = str(error)
             saved_message = None
             created = False
+            conversation_member_ids = []
         except DatabaseError:
             logger.exception("Could not persist MQTT message from user %s", sender_id)
             error_reason = "message could not be saved"
             saved_message = None
             created = False
+            conversation_member_ids = []
         else:
             error_reason = None
         finally:
@@ -154,6 +165,20 @@ class MessageCommandSubscriber:
                     ),
                 },
             )
+            for member_id in conversation_member_ids:
+                self._publish(
+                    client,
+                    CLIENT_MESSAGE_CREATED_TOPIC.format(user_id=member_id),
+                    {
+                        "type": "MESSAGE_CREATED",
+                        "notification_only": True,
+                        "conversation_id": str(saved_message.conversation_id),
+                        "message_id": str(saved_message.message_id),
+                        "sender_id": str(sender_id),
+                        "seq": saved_message.seq,
+                        "created_at": saved_message.created_at.isoformat(),
+                    },
+                )
 
     def _handle_read(self, client, user_id, message):
         try:

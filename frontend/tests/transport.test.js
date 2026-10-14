@@ -80,6 +80,30 @@ test('read commands publish only watched message IDs and accept valid read event
   assert.equal(t.events.length, 1);
   t.transport.close();
 });
+test('inbox message notifications include sender and reach a client before it watches the conversation', () => {
+  const t = setup();
+  t.client.emit('connect');
+  const topic = `chat/client/${uid}/event/message_created`;
+  assert.ok(t.client.subscriptions.flat().includes(topic));
+
+  const event = {
+    type: 'MESSAGE_CREATED',
+    notification_only: true,
+    conversation_id: cid,
+    message_id: mid,
+    sender_id: '44444444-4444-4444-8444-444444444444',
+    seq: 1,
+    created_at: '2026-10-07T12:00:00Z',
+  };
+  t.client.emit('message', topic, Buffer.from(JSON.stringify(event)));
+  assert.deepEqual(t.events, [event]);
+  t.client.emit('message', topic, Buffer.from(JSON.stringify({
+    ...event,
+    sender_id: uid,
+  })));
+  assert.equal(t.events.length, 1);
+  t.transport.close();
+});
 test('friend presence subscription preserves status topics shared with a conversation watch', () => {
   const t = setup();
   t.transport.watch(cid, [uid]);

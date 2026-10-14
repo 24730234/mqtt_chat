@@ -24,6 +24,7 @@ from .mqtt_messages import (
     CLIENT_EVENT_TOPIC,
     CONVERSATION_MESSAGE_TOPIC,
     CONVERSATION_READ_TOPIC,
+    CLIENT_MESSAGE_CREATED_TOPIC,
     MessageCommandSubscriber,
 )
 from .mqtt_presence import PresenceSubscriber
@@ -757,7 +758,7 @@ class MqttMessageTests(TransactionTestCase):
         self.assertEqual(saved.sender, self.sender)
         self.assertEqual(saved.seq, 1)
         self.assertEqual(self.conversation.last_seq, 1)
-        self.assertEqual(self.client.publish.call_count, 2)
+        self.assertEqual(self.client.publish.call_count, 3)
 
         published = self.client.publish.call_args_list
         self.assertEqual(
@@ -779,6 +780,22 @@ class MqttMessageTests(TransactionTestCase):
             ),
         )
         self.assertEqual(json.loads(published[1].args[1])["type"], "MESSAGE_CREATED")
+        self.assertEqual(
+            published[2].args[0],
+            CLIENT_MESSAGE_CREATED_TOPIC.format(user_id=self.recipient.user_id),
+        )
+        self.assertEqual(
+            json.loads(published[2].args[1]),
+            {
+                "type": "MESSAGE_CREATED",
+                "notification_only": True,
+                "conversation_id": str(self.conversation.conversation_id),
+                "message_id": str(saved.message_id),
+                "sender_id": str(self.sender.user_id),
+                "seq": saved.seq,
+                "created_at": saved.created_at.isoformat(),
+            },
+        )
 
     def test_duplicate_retry_is_accepted_without_allocating_a_new_sequence(self):
         payload = {
@@ -793,8 +810,8 @@ class MqttMessageTests(TransactionTestCase):
         self.conversation.refresh_from_db()
         self.assertEqual(Message.objects.count(), 1)
         self.assertEqual(self.conversation.last_seq, 1)
-        self.assertEqual(self.client.publish.call_count, 3)
-        retry_ack = json.loads(self.client.publish.call_args_list[2].args[1])
+        self.assertEqual(self.client.publish.call_count, 4)
+        retry_ack = json.loads(self.client.publish.call_args_list[3].args[1])
         self.assertEqual(retry_ack["type"], "MESSAGE_ACCEPTED")
         self.assertTrue(retry_ack["duplicate"])
 
