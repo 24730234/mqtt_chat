@@ -106,7 +106,8 @@ class MessageCommandSubscriber:
             )
             conversation_member_ids = (
                 list(
-                    saved_message.conversation.members.exclude(user_id=sender_id)
+                    saved_message.conversation.members.filter(is_active=True)
+                    .exclude(user_id=sender_id)
                     .values_list("user_id", flat=True)
                 )
                 if created

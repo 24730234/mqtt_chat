@@ -19,10 +19,15 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path
 
-from chat import views
+from chat import auth_views, views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path("api/auth/csrf/", auth_views.csrf_token, name="auth-csrf"),
+    path("api/auth/register/", auth_views.register, name="auth-register"),
+    path("api/auth/login/", auth_views.login_view, name="auth-login"),
+    path("api/auth/me/", auth_views.me, name="auth-me"),
+    path("api/auth/logout/", auth_views.logout_view, name="auth-logout"),
     path("api/users/", views.create_user, name="create-user"),
     path("api/users/search/", views.search_users, name="search-users"),
     path("api/users/<uuid:user_id>/", views.update_user, name="update-user"),
@@ -63,6 +68,41 @@ urlpatterns = [
         "api/users/<uuid:user_id>/conversations/",
         views.list_conversations,
         name="list-user-conversations",
+    ),
+    path(
+        "api/conversations/<uuid:conversation_id>/",
+        views.conversation_detail,
+        name="conversation-detail",
+    ),
+    path(
+        "api/conversations/<uuid:conversation_id>/members/<uuid:user_id>/",
+        views.remove_group_member,
+        name="remove-group-member",
+    ),
+    path(
+        "api/conversations/<uuid:conversation_id>/members/<uuid:user_id>/role/",
+        views.change_group_member_role,
+        name="change-group-member-role",
+    ),
+    path(
+        "api/conversations/<uuid:conversation_id>/leave/",
+        views.leave_group,
+        name="leave-group",
+    ),
+    path(
+        "api/conversations/<uuid:conversation_id>/transfer-ownership/",
+        views.transfer_group_ownership,
+        name="transfer-group-ownership",
+    ),
+    path(
+        "api/conversations/<uuid:conversation_id>/archive/",
+        views.archive_group,
+        name="archive-group",
+    ),
+    path(
+        "api/room-invitations/<uuid:invitation_id>/",
+        views.cancel_room_invitation,
+        name="cancel-room-invitation",
     ),
     path(
         "api/conversations/<uuid:conversation_id>/messages/search/",

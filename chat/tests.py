@@ -1,5 +1,3 @@
-from django.test import TestCase
-
 import json
 import tempfile
 import uuid
@@ -8,7 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, TransactionTestCase, override_settings
+from django.utils import timezone
 
 from .models import (
     Conversation,
@@ -28,6 +28,25 @@ from .mqtt_messages import (
     MessageCommandSubscriber,
 )
 from .mqtt_presence import PresenceSubscriber
+from .services import ChatService, ServiceError
+
+
+def link_profile(profile):
+    auth_user = get_user_model().objects.create_user(
+        username=profile.username,
+        password="Test-Password-123!",
+    )
+    profile.auth_user = auth_user
+    profile.save(update_fields=["auth_user"])
+    return auth_user
+
+
+def login_profile(client, profile):
+    auth_user = profile.auth_user_id and profile.auth_user or link_profile(profile)
+    client.force_login(auth_user)
+    session = client.session
+    session["chat_auth_expires_at"] = timezone.now().timestamp() + 8 * 60 * 60
+    session.save()
 
 
 class UserAvatarTests(TestCase):
@@ -39,6 +58,7 @@ class UserAvatarTests(TestCase):
         self.addCleanup(media_settings.disable)
         self.client = Client()
         self.user = User.objects.create(username="avatar-user")
+        login_profile(self.client, self.user)
         self.url = f"/api/users/{self.user.user_id}/avatar/"
 
     def test_user_can_upload_and_remove_avatar(self):
@@ -136,35 +156,41 @@ class UserProfileApiTests(TestCase):
 
     def test_create_and_patch_user_profile(self):
         response = self.client.post(
-            "/api/users/",
+            "/api/auth/register/",
             data=json.dumps(
                 {
                     "username": "profile-user",
-                    "short_bio": "IoT learner",
-                    "bio": "Building chat apps.",
-                    "sex": "female",
+                    "password": "Profile-Password-123!",
+                    "password_confirm": "Profile-Password-123!",
                 }
             ),
             content_type="application/json",
         )
 
         self.assertEqual(response.status_code, 201)
-        user_id = response.json()["user_id"]
-        self.assertEqual(response.json()["status"], User.PresenceStatus.OFFLINE)
-        self.assertEqual(response.json()["short_bio"], "IoT learner")
-        self.assertEqual(response.json()["sex"], "female")
+        user_id = response.json()["user"]["user_id"]
+        self.assertTrue(User.objects.get(user_id=user_id).auth_user.check_password("Profile-Password-123!"))
+        self.client.post(
+            "/api/auth/login/",
+            data=json.dumps(
+                {"username": "profile-user", "password": "Profile-Password-123!"}
+            ),
+            content_type="application/json",
+        )
 
         response = self.client.patch(
             f"/api/users/{user_id}/",
-            data=json.dumps({"bio": "Updated bio", "status": "online", "sex": "male"}),
+            data=json.dumps(
+                {"short_bio": "IoT learner", "bio": "Updated bio", "sex": "male"}
+            ),
             content_type="application/json",
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["bio"], "Updated bio")
-        self.assertEqual(response.json()["status"], "online")
-        self.assertEqual(response.json()["sex"], "male")
         self.assertEqual(response.json()["short_bio"], "IoT learner")
+        self.assertEqual(response.json()["sex"], "male")
+        self.assertEqual(response.json()["status"], "offline")
 
     def test_rejects_invalid_profile_values(self):
         response = self.client.post(
@@ -173,7 +199,7 @@ class UserProfileApiTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 410)
         self.assertFalse(User.objects.filter(username="bad-user").exists())
 
 
@@ -182,6 +208,8 @@ class FriendsApiTests(TestCase):
         self.client = Client()
         self.user = User.objects.create(username="friend-list-owner")
         self.friend = User.objects.create(username="friend-entry")
+        login_profile(self.client, self.user)
+        link_profile(self.friend)
         UserFriend.objects.bulk_create(
             [
                 UserFriend(user=self.user, friend=self.friend),
@@ -204,6 +232,7 @@ class FriendsApiTests(TestCase):
             User.objects.create(username="friend-b"),
         ]
         for friend in friends:
+            link_profile(friend)
             UserFriend.objects.bulk_create(
                 [
                     UserFriend(user=self.user, friend=friend),
@@ -251,6 +280,8 @@ class FriendsApiTests(TestCase):
         outgoing_recipient = User.objects.create(username="outgoing-recipient")
         Invitation.objects.create(sender=incoming_sender, user=self.user)
         Invitation.objects.create(sender=self.user, user=outgoing_recipient)
+        link_profile(incoming_sender)
+        link_profile(outgoing_recipient)
         Invitation.objects.create(
             sender=incoming_sender,
             user=self.user,
@@ -276,12 +307,16 @@ class ConversationApiTests(TestCase):
         self.alex = User.objects.create(username="alex")
         self.sarah = User.objects.create(username="sarah")
         self.kevin = User.objects.create(username="kevin")
+        login_profile(self.client, self.alex)
+        link_profile(self.sarah)
+        link_profile(self.kevin)
 
-    def post_json(self, url, body):
+    def post_json(self, url, body, headers=None):
         return self.client.post(
             url,
             data=json.dumps(body),
             content_type="application/json",
+            headers=headers,
         )
 
     def test_private_conversation_is_reused_with_exact_members(self):
@@ -304,6 +339,7 @@ class ConversationApiTests(TestCase):
             {self.alex.user_id, self.sarah.user_id},
         )
 
+        login_profile(self.client, self.sarah)
         repeated = self.post_json(
             "/api/conversations/",
             {
@@ -329,13 +365,21 @@ class ConversationApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["name"], "Study group")
+        group = Conversation.objects.get(
+            conversation_id=response.json()["conversation_id"]
+        )
+        self.assertEqual(group.owner_id, self.alex.user_id)
         self.assertEqual(
             set(
                 ConversationMember.objects.filter(
-                    conversation_id=response.json()["conversation_id"]
+                    conversation=group, is_active=True
                 ).values_list("user_id", flat=True)
             ),
-            {self.alex.user_id, self.sarah.user_id, self.kevin.user_id},
+            {self.alex.user_id},
+        )
+        self.assertEqual(
+            set(group.room_invitations.values_list("user_id", flat=True)),
+            {self.sarah.user_id, self.kevin.user_id},
         )
 
     def test_list_user_conversations_includes_members_and_latest_message(self):
@@ -436,7 +480,7 @@ class ConversationApiTests(TestCase):
         response = self.client.get(
             f"/api/users/{uuid.uuid4()}/conversations/"
         )
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 403)
 
     def test_rejects_group_with_unknown_username_without_creating_members(self):
         response = self.post_json(
@@ -456,6 +500,7 @@ class ConversationApiTests(TestCase):
         group = Conversation.objects.create(
             name="Project team",
             conversation_type=Conversation.ConversationType.GROUP,
+            owner=self.alex,
         )
         ConversationMember.objects.create(conversation=group, user=self.alex)
         response = self.post_json(
@@ -465,10 +510,12 @@ class ConversationApiTests(TestCase):
                 "user_id": str(self.sarah.user_id),
                 "conversation_id": str(group.conversation_id),
             },
+            headers={"If-Match": '"1"'},
         )
         self.assertEqual(response.status_code, 201)
         invitation_id = response.json()["invitation_id"]
 
+        login_profile(self.client, self.sarah)
         inbox = self.client.get(
             f"/api/users/{self.sarah.user_id}/invitations/"
         ).json()
@@ -480,7 +527,8 @@ class ConversationApiTests(TestCase):
 
         response = self.post_json(
             f"/api/room-invitations/{invitation_id}/respond/",
-            {"user_id": str(self.sarah.user_id), "status": "ACCEPT"},
+            {"status": "ACCEPT"},
+            headers={"If-Match": '"2"'},
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(
@@ -495,7 +543,8 @@ class ConversationApiTests(TestCase):
 
     def test_room_invitation_reject_and_sender_permission(self):
         group = Conversation.objects.create(
-            conversation_type=Conversation.ConversationType.GROUP
+            conversation_type=Conversation.ConversationType.GROUP,
+            owner=self.alex,
         )
         ConversationMember.objects.create(conversation=group, user=self.alex)
         non_member_send = self.post_json(
@@ -513,9 +562,11 @@ class ConversationApiTests(TestCase):
             sender=self.alex,
             user=self.sarah,
         )
+        login_profile(self.client, self.sarah)
         rejected = self.post_json(
             f"/api/room-invitations/{invitation.invitation_id}/respond/",
-            {"user_id": str(self.sarah.user_id), "status": "REJECT"},
+            {"status": "REJECT"},
+            headers={"If-Match": '"1"'},
         )
         self.assertEqual(rejected.status_code, 200)
         self.assertFalse(
@@ -952,3 +1003,229 @@ class MqttMessageTests(TransactionTestCase):
         error_payload = json.loads(self.client.publish.call_args.args[1])
         self.assertEqual(error_payload["type"], "ERROR")
         self.assertIn("seq is assigned by the server", error_payload["error"])
+
+
+class AuthenticatedApiTests(TestCase):
+    def test_registration_login_csrf_and_session_restore(self):
+        client = Client(enforce_csrf_checks=True)
+        rejected = client.post(
+            "/api/auth/register/",
+            data=json.dumps(
+                {
+                    "username": "csrf-user",
+                    "password": "Secure-Password-123!",
+                    "password_confirm": "Secure-Password-123!",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(rejected.json()["error"], "CSRF verification failed")
+
+        token_response = client.get("/api/auth/csrf/")
+        token = token_response.json()["csrfToken"]
+        registered = client.post(
+            "/api/auth/register/",
+            data=json.dumps(
+                {
+                    "username": "csrf-user",
+                    "password": "Secure-Password-123!",
+                    "password_confirm": "Secure-Password-123!",
+                }
+            ),
+            content_type="application/json",
+            headers={"X-CSRFToken": token},
+        )
+        self.assertEqual(registered.status_code, 201)
+        self.assertTrue(
+            User.objects.get(username="csrf-user").auth_user.check_password(
+                "Secure-Password-123!"
+            )
+        )
+
+        login_response = client.post(
+            "/api/auth/login/",
+            data=json.dumps(
+                {
+                    "username": "csrf-user",
+                    "password": "Secure-Password-123!",
+                    "remember_me": True,
+                }
+            ),
+            content_type="application/json",
+            headers={"X-CSRFToken": client.cookies["csrftoken"].value},
+        )
+        self.assertEqual(login_response.status_code, 200)
+        self.assertEqual(login_response["Cache-Control"], "no-store")
+        self.assertIn("csrfToken", login_response.json())
+        restored = client.get("/api/auth/me/")
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()["user"]["username"], "csrf-user")
+
+    def test_expired_or_missing_session_cannot_use_protected_api(self):
+        client = Client()
+        self.assertEqual(client.get("/api/users/search/").status_code, 401)
+
+        profile = User.objects.create(username="expired-user")
+        login_profile(client, profile)
+        session = client.session
+        session["chat_auth_expires_at"] = timezone.now().timestamp() - 1
+        session.save()
+        response = client.get(f"/api/users/{profile.user_id}/friends/")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(client.get("/api/auth/me/").status_code, 401)
+
+    def test_legacy_user_creation_endpoint_is_disabled(self):
+        response = Client().post(
+            "/api/users/",
+            data=json.dumps({"username": "legacy-user"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 410)
+        self.assertFalse(User.objects.filter(username="legacy-user").exists())
+
+
+class GroupManagementApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.owner = User.objects.create(username="group-owner")
+        self.admin = User.objects.create(username="group-admin")
+        self.member = User.objects.create(username="group-member")
+        self.other = User.objects.create(username="group-outsider")
+        for profile in (self.admin, self.member, self.other):
+            link_profile(profile)
+        login_profile(self.client, self.owner)
+        self.group = Conversation.objects.create(
+            name="Original name",
+            description="Original description",
+            conversation_type=Conversation.ConversationType.GROUP,
+            owner=self.owner,
+        )
+        ConversationMember.objects.bulk_create(
+            [
+                ConversationMember(conversation=self.group, user=self.owner),
+                ConversationMember(
+                    conversation=self.group,
+                    user=self.admin,
+                    role=ConversationMember.Role.ADMIN,
+                ),
+                ConversationMember(conversation=self.group, user=self.member),
+            ]
+        )
+
+    def test_group_detail_is_member_only_and_reports_permissions(self):
+        RoomInvitation.objects.create(
+            conversation=self.group,
+            sender=self.owner,
+            user=self.other,
+        )
+        detail = self.client.get(f"/api/conversations/{self.group.conversation_id}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["role"], "OWNER")
+        self.assertTrue(detail.json()["permissions"]["can_manage_roles"])
+        self.assertEqual(
+            [person["username"] for person in detail.json()["pending_invitations"]],
+            [self.other.username],
+        )
+
+        login_profile(self.client, self.other)
+        denied = self.client.get(f"/api/conversations/{self.group.conversation_id}/")
+        self.assertEqual(denied.status_code, 403)
+
+    def test_group_update_requires_version_and_enforces_roles(self):
+        login_profile(self.client, self.member)
+        denied = self.client.patch(
+            f"/api/conversations/{self.group.conversation_id}/",
+            data=json.dumps({"name": "forged"}),
+            content_type="application/json",
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(denied.status_code, 403)
+        self.group.refresh_from_db()
+        self.assertEqual(self.group.name, "Original name")
+
+        login_profile(self.client, self.owner)
+        missing = self.client.patch(
+            f"/api/conversations/{self.group.conversation_id}/",
+            data=json.dumps({"name": "Renamed"}),
+            content_type="application/json",
+        )
+        self.assertEqual(missing.status_code, 428)
+        updated = self.client.patch(
+            f"/api/conversations/{self.group.conversation_id}/",
+            data=json.dumps({"name": "Renamed", "description": "Updated"}),
+            content_type="application/json",
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["version"], 2)
+        stale = self.client.patch(
+            f"/api/conversations/{self.group.conversation_id}/",
+            data=json.dumps({"name": "Stale write"}),
+            content_type="application/json",
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(stale.status_code, 412)
+
+    def test_admin_can_remove_member_but_cannot_remove_admin_or_owner(self):
+        login_profile(self.client, self.admin)
+        url = f"/api/conversations/{self.group.conversation_id}/members/"
+        denied_owner = self.client.delete(
+            f"{url}{self.owner.user_id}/",
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(denied_owner.status_code, 409)
+        removed = self.client.delete(
+            f"{url}{self.member.user_id}/",
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(removed.status_code, 200)
+        self.assertFalse(
+            ConversationMember.objects.get(
+                conversation=self.group, user=self.member
+            ).is_active
+        )
+
+    def test_owner_can_transfer_then_old_owner_leave(self):
+        target_url = f"/api/conversations/{self.group.conversation_id}/transfer-ownership/"
+        transferred = self.client.post(
+            target_url,
+            data=json.dumps({"new_owner_id": str(self.member.user_id)}),
+            content_type="application/json",
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(transferred.status_code, 200)
+        self.group.refresh_from_db()
+        self.assertEqual(self.group.owner_id, self.member.user_id)
+        old_owner_membership = ConversationMember.objects.get(
+            conversation=self.group, user=self.owner
+        )
+        self.assertEqual(old_owner_membership.role, ConversationMember.Role.ADMIN)
+
+        leave = self.client.post(
+            f"/api/conversations/{self.group.conversation_id}/leave/",
+            headers={"If-Match": '"2"'},
+        )
+        self.assertEqual(leave.status_code, 200)
+        old_owner_membership.refresh_from_db()
+        self.assertFalse(old_owner_membership.is_active)
+
+    def test_archived_group_remains_readable_but_rejects_new_messages(self):
+        archived = self.client.post(
+            f"/api/conversations/{self.group.conversation_id}/archive/",
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(archived.status_code, 200)
+        self.assertTrue(archived.json()["is_archived"])
+        conversation, history = ChatService().load_history(
+            self.group.conversation_id, self.owner.user_id
+        )
+        self.assertEqual(conversation.conversation_id, self.group.conversation_id)
+        self.assertEqual(history, [])
+        with self.assertRaises(ServiceError):
+            ChatService().send_message(
+                self.owner.user_id,
+                self.group.conversation_id,
+                str(uuid.uuid4()),
+                "not allowed",
+            )

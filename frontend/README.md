@@ -1,6 +1,6 @@
 # Mạch — MQTT Chat Frontend
 
-React + Vite + MQTT.js. Giao diện tiếng Việt, chế độ demo độc lập và chế độ kết nối API/MQTT theo BE commit `78f0fe7`.
+React + Vite + MQTT.js. Giao diện tiếng Việt, chế độ demo độc lập và live mode kết nối API/MQTT.
 
 ## Chạy
 
@@ -26,7 +26,8 @@ theo repository local.
 
 - Demo: `http://127.0.0.1:5173/`.
 - Live: `http://127.0.0.1:5173/?mode=live`, hoặc nút **KẾT NỐI BE** trong demo.
-- Live chưa có auth: chọn user tồn tại bằng tìm username hoặc tạo user. Không nhập tài khoản giả từ demo vào BE.
+- Live yêu cầu đăng ký/đăng nhập tài khoản backend; session được giữ bằng cookie HttpOnly và mutation HTTP gửi CSRF token.
+- Đăng nhập chỉ bảo vệ API HTTP. Broker vẫn chạy MQTT v1 anonymous theo cấu hình hiện tại; không đưa broker này ra Internet hoặc coi chat realtime là riêng tư.
 - Chạy Django HTTP server, MQTT message worker, presence subscriber và broker theo README gốc.
 
 ## Cấu hình
@@ -37,7 +38,7 @@ theo repository local.
 | `VITE_API_BASE` | `/api` | Prefix API được bundle vào FE |
 | `VITE_MQTT_URL` | `ws://127.0.0.1:9001` | URL ví dụ; BE phải bật listener WebSocket tương ứng |
 
-Có thể thay API base, URL MQTT và credentials trên màn **Cấu hình kết nối** trước khi chọn user.
+Có thể thay API base, URL MQTT và credentials trên màn **Cấu hình kết nối** trước khi đăng nhập.
 Địa chỉ API/MQTT được nhớ trong sessionStorage của tab qua lần reload; credentials không được lưu.
 Trên localhost, nút **Dùng server test** điền sẵn API `18000` và MQTT WebSocket `19001` cho fixture.
 MQTT password chỉ ở bộ nhớ, không đưa vào env `VITE_*` hoặc localStorage.
@@ -49,9 +50,9 @@ Trang HTTPS cần `wss://` để tránh mixed content.
 
 - `src/Root.jsx`: đổi demo/live, lazy-load MQTT.
 - `src/App.jsx`, `src/chatService.js`: demo cũ, dữ liệu riêng.
-- `src/live/LiveApp.jsx`: chọn user, workspace chat, profile/avatar, bạn bè, tạo/mở hội thoại.
+- `src/live/LiveApp.jsx`: auth session, workspace chat, profile/avatar, bạn bè, tạo/mở hội thoại và quản lý nhóm.
 - `src/live/api.js`: HTTP API adapter, validation avatar, lỗi mạng/HTTP.
-- `src/live/transport.js`: MQTT topics, ACK nghiệp vụ, timeout, retry, presence, reconnect.
+- `src/live/transport.js`: MQTT topics, ACK nghiệp vụ, timeout, retry, presence, typing, reconnect.
 - `src/live/state.js`: chuẩn hóa history, merge/ordering/dedup.
 - `tests/*.test.js`: các ca logic và contract có hồi quy cần kiểm tra.
 
@@ -65,12 +66,19 @@ Trang HTTPS cần `wss://` để tránh mixed content.
   bao gồm thành viên và tin nhắn cuối cùng; danh sách được sắp xếp theo hoạt động mới nhất.
 - Mục Bạn bè dùng phân trang keyset theo cuộn, tìm kiếm trên máy chủ và lọc bạn bè online;
   mục Lời mời quản lý lời mời kết bạn/nhóm đến và đã gửi, chấp nhận hoặc từ chối lời mời đến.
+- Bấm hội thoại trong sidebar luôn chuyển về module Tin nhắn và mở hội thoại được chọn, kể cả
+  khi đang xem Bạn bè hoặc Lời mời. Header hội thoại PRIVATE không hiện số thành viên.
+- Tạo nhóm gửi lời mời đến các tài khoản được chọn; họ chỉ xuất hiện trong danh sách thành viên
+  sau khi chấp nhận. Drawer quản lý nhóm hiển thị riêng các lời mời đang chờ.
 - Mở bằng UUID kiểm tra membership bằng history rồi tải metadata hội thoại từ danh sách
   máy chủ. Không tự join hội thoại.
 - Reconnect resubscribe và fetch trang 50 tin mới nhất; người dùng bấm tải cũ hơn nếu cần.
   Chưa có outbox offline hoặc đảm bảo đồng bộ mọi khoảng trống; BE còn thiếu sync contract.
 - Drafts/pending messages chỉ trong bộ nhớ phiên; reload/đổi tài khoản sẽ mất.
 - Presence theo một topic/user có hạn chế nhiều tab đồng thời; cần chốt xử lý ở BE.
+- Typing dùng MQTT trực tiếp trên `chat/conversations/{conversation_id}/event/typing`,
+  không retain; client nhận chỉ chấp nhận user là thành viên đang theo dõi và tự hết hạn
+  sau 3,5 giây. Broker hiện chưa có ACL nên chỉ dùng trong môi trường development tin cậy.
 
 ## Kiểm tra
 
@@ -78,6 +86,12 @@ Trang HTTPS cần `wss://` để tránh mixed content.
 npm test
 npm run build
 ```
+
+Trạng thái mới nhất: **24/24 frontend tests qua** và production build thành công. Backend có
+**39/39 Django tests**, `manage.py check` và `makemigrations --check --dry-run` đều qua.
+Backend auth/group UI được tích hợp; xem [HANDOFF](../HANDOFF.md) để biết migration,
+legacy mapping và các giới hạn MQTT/production. Các số liệu dưới đây là kết quả của những
+mốc tích hợp cũ, không thay thế kết quả mới nhất hoặc nghiệm thu trên môi trường triển khai.
 
 Đã qua 18 unit/contract tests và build. Đã kiểm tra trình duyệt với fixture: profile PATCH,
 tạo nhóm, mở history có 55 tin, tải 50 + 5, reply, ACK, refresh không trùng và hai phiên user realtime.

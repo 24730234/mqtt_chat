@@ -1,6 +1,8 @@
 import uuid
 
 from django.db import IntegrityError
+from django.db import transaction
+from django.core.exceptions import ValidationError
 
 from ..db_connection import DatabaseConnection
 from ..models import Invitation, User
@@ -9,11 +11,12 @@ from ..repositories import (
     UserFriendRepository,
     UserRepository,
 )
+from ..username_validation import validate_auth_username
 from .errors import ConflictError, NotFoundError, PermissionError, ServiceError
 
 
 class UserService:
-    PROFILE_FIELDS = {"status", "short_bio", "bio", "sex"}
+    PROFILE_FIELDS = {"short_bio", "bio", "sex"}
     MAX_AVATAR_SIZE = 5 * 1024 * 1024
     AVATAR_SIGNATURES = (
         (b"\xFF\xD8\xFF", "jpg"),
@@ -56,8 +59,6 @@ class UserService:
             value = fields[field]
             if not isinstance(value, str):
                 raise ServiceError(f"{field} must be a string")
-            if field == "status" and value not in User.PresenceStatus.values:
-                raise ServiceError("status must be online or offline")
             if field == "sex" and value not in ("", *User.Sex.values):
                 raise ServiceError("sex must be female or male")
             if field == "short_bio" and len(value) > 160:
@@ -82,13 +83,23 @@ class UserService:
             username = username.strip() if isinstance(username, str) else ""
             if not username:
                 raise ServiceError("username is required")
+            if len(username) > 100:
+                raise ServiceError("username must be 100 characters or fewer")
+            try:
+                validate_auth_username(username)
+            except ValidationError as exc:
+                raise ServiceError(" ".join(exc.messages)) from exc
         profile = self._validated_profile(fields)
         if username is None and not profile:
             raise ServiceError("at least one user field is required")
         if username is not None:
             profile["username"] = username
         try:
-            return self.users.update_profile(user, **profile)
+            with transaction.atomic():
+                if username is not None and user.auth_user_id:
+                    user.auth_user.username = username
+                    user.auth_user.save(update_fields=["username"])
+                return self.users.update_profile(user, **profile)
         except IntegrityError as exc:
             raise ConflictError("username already exists") from exc
 
@@ -136,6 +147,8 @@ class UserService:
         recipient = self._get_user(recipient_id)
         if sender == recipient:
             raise ServiceError("cannot invite yourself")
+        if recipient.auth_user_id is None or not recipient.auth_user.is_active:
+            raise NotFoundError("user not found")
         if self.users.are_friends(sender, recipient):
             raise ConflictError("users are already friends")
         if self.invitations.has_pending_between(sender, recipient):

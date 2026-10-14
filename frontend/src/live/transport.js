@@ -25,6 +25,7 @@ export function createTransport({ connect, url, userId, username, password, onSt
       `chat/client/${userId}/event/message_created`,
       ...[...watched.keys()].map(id => `chat/conversations/${id}/event/message_created`),
       ...[...watched.keys()].map(id => `chat/conversations/${id}/event/message_read`),
+      ...[...watched.keys()].map(id => `chat/conversations/${id}/event/typing`),
       ...[...presenceUserIds()].map(id => `chat/users/${id}/status`)])];
   }
   function updateSubscriptions(previousTopics) {
@@ -74,7 +75,15 @@ export function createTransport({ connect, url, userId, username, password, onSt
       event.type === 'MESSAGE_CREATED' && event.notification_only === true;
     const isCreated = watched.has(event.conversation_id) && topic === `chat/conversations/${event.conversation_id}/event/message_created` && event.type === 'MESSAGE_CREATED';
     const isRead = watched.has(event.conversation_id) && topic === `chat/conversations/${event.conversation_id}/event/message_read` && event.type === 'MESSAGE_READ';
-    if (!(isAccepted || isError || isInboxMessage || isCreated || isRead)) return;
+    const isTyping = typeof event.conversation_id === 'string' &&
+      watched.has(event.conversation_id) &&
+      topic === `chat/conversations/${event.conversation_id}/event/typing` &&
+      event.type === 'TYPING' &&
+      validUuid(event.user_id) &&
+      event.user_id !== userId &&
+      watched.get(event.conversation_id).includes(event.user_id) &&
+      typeof event.is_typing === 'boolean';
+    if (!(isAccepted || isError || isInboxMessage || isCreated || isRead || isTyping)) return;
     if ((isAccepted || isCreated) && (!validUuid(event.message_id) || !validUuid(event.conversation_id) || !validUuid(event.client_message_id) || !Number.isSafeInteger(event.seq) || event.seq < 1 || !Number.isFinite(Date.parse(event.created_at)))) return;
     if (isInboxMessage && (!validUuid(event.message_id) || !validUuid(event.conversation_id) ||
       !validUuid(event.sender_id) || event.sender_id === userId ||
@@ -137,6 +146,23 @@ export function createTransport({ connect, url, userId, username, password, onSt
       }), { qos: 1, retain: false }, error => {
         if (error) update('error', error.message);
       });
+    },
+    typing(conversationId, isTyping) {
+      if (!ready || !client.connected || !watched.has(conversationId)) return false;
+      client.publish(
+        `chat/conversations/${conversationId}/event/typing`,
+        JSON.stringify({
+          type: 'TYPING',
+          conversation_id: conversationId,
+          user_id: userId,
+          is_typing: Boolean(isTyping),
+        }),
+        { qos: 1, retain: false },
+        error => {
+          if (error) update('error', error.message);
+        },
+      );
+      return true;
     },
     close() {
       stopped = true; ready = false;

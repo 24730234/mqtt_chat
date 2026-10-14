@@ -38,13 +38,21 @@ class UserRepository:
         return user
 
     def search(self, username):
-        return User.objects.filter(username__icontains=username).order_by("username")
+        return User.objects.filter(
+            username__icontains=username,
+            auth_user__isnull=False,
+            auth_user__is_active=True,
+        ).order_by("username")
 
     def are_friends(self, first, second):
         return UserFriend.objects.filter(user=first, friend=second).exists()
 
     def friends_page(self, user, query="", online_only=False, after=None, limit=25):
-        friends = User.objects.filter(friend_of=user).distinct()
+        friends = User.objects.filter(
+            friend_of=user,
+            auth_user__isnull=False,
+            auth_user__is_active=True,
+        ).distinct()
         if query:
             friends = friends.filter(
                 Q(username__icontains=query) | Q(short_bio__icontains=query)
@@ -63,7 +71,15 @@ class UserRepository:
         return page[:limit], total, online_total, has_more
 
     def friends(self, user):
-        return User.objects.filter(friend_of=user).distinct().order_by("username")
+        return (
+            User.objects.filter(
+                friend_of=user,
+                auth_user__isnull=False,
+                auth_user__is_active=True,
+            )
+            .distinct()
+            .order_by("username")
+        )
 
     def remove_friendship(self, first, second):
         return UserFriend.objects.filter(

@@ -18,19 +18,22 @@ Nguyên tắc thiết kế:
 
 ## Tính năng
 
-- Trò chuyện cá nhân
-- Trò chuyện nhóm
-- Tải ảnh đại diện người dùng
-- Gửi và nhận tin nhắn thời gian thực
-- Lưu tin nhắn trong MySQL
-- Sắp xếp thứ tự tin nhắn
-- Chống tin nhắn trùng lặp
-- Đồng bộ khi ngoại tuyến
-- Trạng thái Đã gửi / Đã nhận / Đã đọc
-- Chỉ báo đang nhập
-- Trạng thái Trực tuyến / Ngoại tuyến
-- Hỗ trợ MQTT Last Will
-- Django Admin để kiểm thử và quản trị
+- Trò chuyện cá nhân/nhóm, lưu tin trong MySQL, sắp thứ tự theo sequence và chống trùng khi retry.
+- Đăng ký/đăng nhập bằng Django session, CSRF, thời hạn phiên và bảo vệ API HTTP.
+- Phân quyền nhóm OWNER/ADMIN/MEMBER, lời mời, rời nhóm, loại thành viên, chuyển owner và archive.
+  Khi tạo nhóm, các tài khoản được chọn nhận lời mời; họ trở thành thành viên sau khi chấp nhận.
+- Hồ sơ/avatar, bạn bè/lời mời, lịch sử/tìm kiếm tin nhắn và READ receipt.
+- Truyền tin realtime, presence retained và MQTT Last Will qua broker hiện tại.
+- Django Admin để kiểm thử và quản trị.
+
+Typing indicator đã được nối trực tiếp qua MQTT theo hội thoại; delivered, đồng bộ offline đầy đủ
+và xác thực/ACL MQTT chưa được triển khai. Broker anonymous chỉ phù hợp môi trường phát triển tin cậy.
+Đăng nhập HTTP **không** xác thực kết nối MQTT.
+
+Trong giao diện live, lời mời nhóm đang chờ được tách khỏi danh sách thành viên; thông tin/quản
+lý nhóm mở trong panel bên phải có thể cuộn. Chọn hội thoại ở sidebar sẽ chuyển sang màn hình
+Tin nhắn và mở hội thoại đó dù đang đứng ở Bạn bè hoặc Lời mời. Header chat cá nhân không hiển
+thị số thành viên.
 
 ## Công nghệ sử dụng
 
@@ -108,7 +111,7 @@ sqlparse==0.6.0
 tzdata==2026.4
 ```
 
-### 3. Cấu hình MySQL
+### 3. Cấu hình MySQL và Django
 
 Dự án được cấu hình sử dụng MySQL ở cổng `3307` thay vì cổng mặc định `3306` của MariaDB/XAMPP.
 
@@ -120,25 +123,21 @@ CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
 ```
 
-Kiểm tra lại cấu hình cơ sở dữ liệu Django trong `config/settings.py`:
+Ví dụ đặt biến môi trường trong PowerShell:
 
-```python
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": "mqtt_chat",
-        "USER": "root",
-        "PASSWORD": "123456",
-        "HOST": "127.0.0.1",
-        "PORT": "3307",
-        "OPTIONS": {
-            "charset": "utf8mb4",
-        },
-    }
-}
+```powershell
+$env:DB_NAME = "mqtt_chat"
+$env:DB_USER = "root"
+$env:DB_PASSWORD = "<your-local-password>"
+$env:DB_HOST = "127.0.0.1"
+$env:DB_PORT = "3307"
+$env:DJANGO_DEBUG = "true"
 ```
 
-Với môi trường production hoặc dự án làm việc nhóm, không nên ghi cứng thông tin bí mật trong mã nguồn. Hãy ưu tiên biến môi trường hoặc file `.env`.
+Có thể bỏ qua các biến DB để dùng mặc định phát triển trong `config/settings.py`.
+`DJANGO_SECRET_KEY` có giá trị phát triển cục bộ khi `DJANGO_DEBUG=true`; production bắt buộc
+đặt secret riêng và `DJANGO_DEBUG=false`. Khi production, session/CSRF cookie dùng Secure mặc
+định và ứng dụng phải được phục vụ qua HTTPS.
 
 ### 4. Chạy migration
 
@@ -167,55 +166,47 @@ dùng có trường `avatar_url`, nhận giá trị `null` nếu chưa có ảnh
 trường phát triển, file tải lên được phục vụ từ `/media/`; môi trường production
 cần cấu hình riêng việc lưu trữ và phục vụ media.
 
-## Hồ sơ người dùng và cuộc trò chuyện
+## Đăng nhập HTTP và quản lý nhóm
 
-Tạo người dùng với `username` và các trường tùy chọn `status` (`online` hoặc
-`offline`), `short_bio` (tối đa 160 ký tự), `bio` và `sex` (`female` hoặc
-`male`). Người dùng mới mặc định có trạng thái `offline`;
-`PATCH /api/users/{user_id}/` chấp nhận một phần hoặc toàn bộ các trường trên.
+Mọi API nghiệp vụ HTTP yêu cầu session đăng nhập, trừ các endpoint auth. Lấy cookie CSRF
+trước khi đăng ký/đăng nhập và gửi token trong header `X-CSRFToken` cho request thay đổi dữ
+liệu. Các endpoint auth:
 
-Tạo mới hoặc sử dụng lại cuộc trò chuyện cá nhân bằng
-`POST /api/conversations/` and JSON `{"user_id":"...","type":"PRIVATE","username":"peer"}`.
-Tạo nhóm bằng `{"user_id":"...","type":"GROUP","name":"Team","usernames":["peer1","peer2"]}`;
-người tạo sẽ tự động được thêm vào nhóm. Username phải tồn tại. Cuộc trò chuyện
-cá nhân chỉ được sử dụng lại khi có đúng hai thành viên trùng khớp.
+- `GET /api/auth/csrf/`
+- `POST /api/auth/register/` với `{"username":"...","password":"...","password_confirm":"..."}`
+- `POST /api/auth/login/` với `{"username":"...","password":"...","remember_me":false}`
+- `GET /api/auth/me/` để phục hồi session hiện tại
+- `POST /api/auth/logout/`
 
-Lấy danh sách bạn bè bằng `GET /api/users/{user_id}/friends/?limit=25`. Dùng
-`cursor` trong phản hồi `next_cursor` để tải trang tiếp theo theo keyset; `q` tìm
-theo username/giới thiệu ngắn và `online=true` chỉ trả về bạn đang trực tuyến.
-`total` và `online_total` là số lượng bạn khớp với từ khóa tìm kiếm.
-Lấy lời mời kết bạn đang chờ bằng `GET /api/users/{user_id}/invitations/`;
-phản hồi có danh sách `incoming`/`sent` cho lời mời kết bạn và
-`room_incoming`/`room_sent` cho lời mời nhóm; mỗi mục có hồ sơ sender/recipient,
-trạng thái và thời gian gửi.
-Chấp nhận hoặc từ chối lời mời đến bằng
-`POST /api/invitations/{invitation_id}/respond/` với `user_id` và `status`
-(`ACCEPT` hoặc `REJECT`).
-Tạo lời mời vào nhóm bằng `POST /api/room-invitations/` với
-`sender_id`, `user_id` (người nhận) và `conversation_id`; sender phải là thành
-viên của nhóm và recipient chưa là thành viên. Người nhận chấp nhận/từ chối bằng
-`POST /api/room-invitations/{invitation_id}/respond/`; chấp nhận sẽ thêm thành
-viên vào nhóm.
+Session hết hạn sau 8 giờ, hoặc 7 ngày khi `remember_me` bật. Profile gắn với tài khoản
+session; client không thể tự đặt presence `status`. Endpoint tạo profile cũ `POST /api/users/`
+bị tắt và trả `410 Gone`. Profile lịch sử chưa liên kết tài khoản không thể đăng nhập cho
+đến khi được ánh xạ rõ ràng bởi quản trị viên.
 
-Lấy danh sách cuộc trò chuyện của người dùng bằng
-`GET /api/users/{user_id}/conversations/`. Phản hồi gồm `conversations`, sắp xếp
-theo thời gian tin nhắn mới nhất giảm dần. Mỗi mục có `conversation_id`, `name`,
-`type`, `created_at`, danh sách `members` chứa hồ sơ người dùng và `last_message`
-(hoặc `null` nếu chưa có tin nhắn). `last_message` gồm `message_id`, `content`,
-`seq`, `created_at` và hồ sơ `sender`.
+Tạo private chat hoặc group qua `POST /api/conversations/`; actor lấy từ session. Group mới
+có creator là OWNER; username được mời chưa tự động trở thành thành viên. Quản lý nhóm gồm
+`GET/PATCH /api/conversations/{id}/`, mời/hủy/đáp lời mời nhóm, đổi role, loại thành viên,
+rời nhóm, chuyển owner và archive. Mỗi mutation nhóm yêu cầu header `If-Match` với version
+hiện tại; stale version trả `412`, thiếu version trả `428`. Chỉ thành viên active mới truy
+cập hội thoại; quyền OWNER/ADMIN giới hạn theo thao tác. API bạn bè, lời mời, profile,
+avatar, conversation list, message history và search cũng yêu cầu session hợp lệ.
 
-Tải tin nhắn bằng
-`GET /api/conversations/{conversation_id}/messages/?user_id={user_id}`.
-Chỉ thành viên cuộc trò chuyện mới có thể đọc lịch sử. `limit` mặc định là 50 và
-giới hạn tối đa 100; `before_seq` trả về các tin nhắn trước số thứ tự đó.
+Các nhóm cũ không tự được gán owner. Sau khi rà soát và sao lưu dữ liệu, quản trị viên có thể
+chuẩn bị file JSON mapping rõ ràng rồi chạy:
 
-Tìm tin nhắn theo nội dung trong một cuộc trò chuyện bằng
-`GET /api/conversations/{conversation_id}/messages/search/?user_id={user_id}&q={keyword}`.
-Tìm kiếm không phân biệt chữ hoa/chữ thường, chỉ áp dụng trong cuộc trò chuyện
-được chỉ định và chỉ thành viên mới có quyền truy cập. `q` là bắt buộc;
-`limit` mặc định là 50, tối đa 100, và `before_seq` phân trang về các kết quả
-có số thứ tự nhỏ hơn giá trị đã cho. Phản hồi gồm `conversation_id`, `query`
-và danh sách `messages` theo thứ tự thời gian.
+```powershell
+.\.venv\Scripts\python.exe manage.py link_chat_accounts C:\secure\account-mapping.json
+.\.venv\Scripts\python.exe manage.py assign_group_owners C:\secure\group-owner-mapping.json
+```
+
+File account mapping là mảng `{"chat_user_id":"...","auth_username":"..."}`; file owner
+mapping là mảng `{"conversation_id":"...","owner_id":"..."}`. Username phải khớp chính xác,
+owner phải là thành viên active. Không suy đoán hoặc tự gán owner cho dữ liệu cũ.
+
+Lịch sử tin nhắn: `GET /api/conversations/{id}/messages/?limit=50&before_seq=...`;
+tìm kiếm: `GET /api/conversations/{id}/messages/search/?q=...`. Cả hai chỉ cho phép thành
+viên active; `limit` mặc định 50, tối đa 100. Conversation list trả members, role, owner,
+version, trạng thái archive và unread count.
 
 ## Cấu hình MQTT Broker
 
@@ -283,9 +274,11 @@ riêng `chat/client/{user_id}/event/message_created`. Thông báo gồm `sender_
 Nếu hội thoại chưa có trong catalog, client tải lại danh sách và history rồi bắt
 đầu subscribe topic tin nhắn của hội thoại.
 
-Cấu hình xác thực và ACL của Mosquitto để client chỉ được publish command dưới
-user ID của chính mình và chỉ subscribe event topic có cùng user ID hoặc các topic
-hội thoại mà họ là thành viên.
+Mosquitto config hiện tại trong `integration/mosquitto-local.conf` cho phép anonymous access
+phát triển. HTTP session không được truyền hoặc xác minh bởi MQTT worker/broker; vì vậy MQTT v1
+và các topic ở trên **không được bảo vệ bởi đăng nhập HTTP**. Không expose broker này ra mạng
+công cộng hoặc coi dữ liệu MQTT là riêng tư. Cần Dynamic Security/ACL, credential theo client
+và giao thức MQTT đã xác thực trước khi triển khai bảo vệ end-to-end.
 
 Frontend gửi `command/read` theo batch cho các tin nhắn của thành viên khác thực
 sự đi vào vùng nhìn thấy trong cửa sổ chat (tối đa 100 ID mỗi batch):
@@ -302,6 +295,12 @@ broadcast `MESSAGE_READ` tại
 `chat/conversations/{conversation_id}/event/message_read`. Lịch sử trả thêm
 `read_by`; danh sách hội thoại trả `unread_count` để khôi phục trạng thái chưa
 đọc sau khi tải lại.
+
+Typing indicator do các MQTT client của hội thoại trao đổi trực tiếp qua
+`chat/conversations/{conversation_id}/event/typing`; payload `TYPING` không retain,
+và client tự ẩn trạng thái sau 3,5 giây nếu không nhận cập nhật. Broker hiện
+anonymous, vì vậy giao thức này chỉ phù hợp môi trường phát triển tin cậy cho
+đến khi triển khai ACL chỉ cho phép thành viên publish/subscribe.
 
 ## Tiến độ frontend và ghi chú bàn giao
 

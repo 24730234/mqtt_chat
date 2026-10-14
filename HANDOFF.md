@@ -2,6 +2,61 @@
 
 File này ghi lại tiến độ, các mốc bàn giao, kết quả kiểm tra và việc còn cần phối hợp. Hướng dẫn cài đặt/chạy ứng dụng nằm trong [README.md](README.md) và [frontend/README.md](frontend/README.md).
 
+## Trạng thái hiện tại — HTTP auth và quản lý nhóm
+
+Implementation plan peer-to-peer đã được triển khai trong phạm vi HTTP và quản lý nhóm; broker
+không được thay đổi theo quyết định của người dùng.
+
+**Đã hoàn thành**
+
+- Đăng ký/đăng nhập Django session, CSRF, phục hồi session, logout và thời hạn tuyệt đối 8 giờ
+  (hoặc 7 ngày với `remember_me`). Các API nghiệp vụ HTTP yêu cầu session; actor lấy từ session,
+  không tin user ID do client tự chọn. Endpoint tạo profile legacy trả `410 Gone`.
+- Quản lý group OWNER/ADMIN/MEMBER, active membership, lời mời/cancel, cập nhật tên/mô tả,
+  đổi role, kick/leave, chuyển owner và archive. Mutation dùng `If-Match`/version để phát hiện
+  cập nhật cũ.
+- Giao diện live có đăng ký/đăng nhập/khôi phục session/logout và panel quản lý nhóm; CSRF được
+  gửi cho mutation HTTP. README gốc và README frontend đã được cập nhật theo contract hiện tại.
+- Thêm management command để link profile cũ và gán owner từ mapping JSON được người quản trị
+  xác nhận. Không tự suy luận danh tính hoặc owner.
+- Cấu hình Django production đọc `DJANGO_DEBUG`/`DJANGO_SECRET_KEY`, bắt buộc secret riêng khi
+  `DEBUG=false`, và bật Secure cookie mặc định khi production.
+
+**Xác nhận:** 39 Django tests ở mốc kiểm tra trước; 25 frontend tests và Vite production build
+ở mốc giao diện mới nhất đều qua. Django system check và `makemigrations --check --dry-run`
+cũng qua ở lần kiểm tra trước. Migration chưa được áp dụng lên database thật/production; cần
+backup và mapping legacy đã duyệt trước khi chạy `manage.py migrate`.
+
+**Chưa hoàn thành / giới hạn phải giữ rõ**
+
+- Broker vẫn anonymous MQTT v1; đăng nhập HTTP không bảo vệ MQTT topic, publish hoặc subscription.
+  Chưa có Dynamic Security, MQTT credential theo connection, thu hồi MQTT khi logout/kick hoặc
+  authorization cho command/event. Không xem đây là hệ thống an toàn để expose ra Internet.
+- Typing indicator đã chạy trực tiếp qua MQTT topic theo hội thoại, payload không retain và client tự hết hạn sau 3,5 giây. Broker vẫn chưa có ACL nên chỉ dùng trong môi trường development tin cậy; delivery receipt, presence đa browser/session và full offline sync chưa hoàn thành.
+- Chưa nghiệm thu migration với MySQL live, broker production, cấu hình HTTPS/reverse proxy hoặc
+  vận hành triển khai; chưa có rate limiting login/register bằng shared storage.
+- Profile người dùng/group legacy cần mapping explicit; các management command chưa có test riêng.
+
+Đây là trạng thái mới nhất và thay thế các ghi chú “chưa có auth”/“chọn user” trong các mốc FE
+trước đây bên dưới. Các mốc cũ được giữ lại làm nhật ký lịch sử, không phải contract hiện hành.
+
+## Cập nhật giao diện live — 15/10/2026
+
+- Tạo nhóm gửi lời mời cho các username đã chọn; người tạo là thành viên ban đầu, người được
+  mời chỉ thành thành viên sau khi chấp nhận. Toast xác nhận liệt kê người nhận; panel nhóm có
+  danh sách lời mời đang chờ để phân biệt với thành viên hiện tại.
+- Panel thông tin/quản lý nhóm được thiết kế lại thành drawer bên phải, cuộn độc lập từ đầu
+  xuống cuối để dùng được khi thông tin nhóm dài.
+- Chọn hội thoại ở sidebar luôn chuyển về module Tin nhắn và mở hội thoại đó, kể cả khi đang
+  ở module Bạn bè hoặc Lời mời.
+- Header của hội thoại PRIVATE không hiện số thành viên; avatar người bạn đã chọn được căn
+  giữa trong thẻ thông tin.
+- Đã nối typing indicator qua MQTT topic riêng của hội thoại: không retain, chỉ chấp nhận event
+  từ thành viên đang theo dõi và tự ẩn sau 3,5 giây. Broker anonymous chưa có ACL nên chỉ dùng
+  trong môi trường phát triển tin cậy.
+- Kiểm tra frontend tại mốc cập nhật: **25/25 tests qua**, `npm run build` thành công. Django
+  tests không chạy trong môi trường hiện tại do thiếu Django.
+
 ## Tiến độ frontend — ngày 29/09/2026
 
 FE được triển khai trong `frontend/` bằng **React + Vite + MQTT.js**, đối chiếu README,
@@ -31,7 +86,7 @@ FE được triển khai trong `frontend/` bằng **React + Vite + MQTT.js**, đ
 | Presence | Đã nối giao thức, cần kiểm tra thêm đa trình duyệt | Retained online, Last Will offline; mỗi browser subscribe status của bạn bè đã tải và thành viên hội thoại đang theo dõi |
 | Reconnect | Đã làm mức cơ bản | Tự kết nối lại, subscribe lại, tải 50 tin mới nhất cho hội thoại đã biết |
 | Bạn bè/lời mời | Đã nối API | Danh sách bạn có keyset paging, tìm kiếm/lọc online; lời mời bạn bè/nhóm đến và đã gửi, chấp nhận/từ chối; sidebar thông tin thu gọn/mở rộng |
-| Đã nhận / typing | Chưa tích hợp thật | Chưa có giao thức delivered receipt hoặc typing |
+| Đã nhận / typing | Typing đã nối MQTT; delivered chưa có | Typing gửi event không retain trong topic hội thoại, chỉ hiện user thuộc danh sách member đang theo dõi và tự hết hạn sau 3,5 giây. Broker anonymous chưa an toàn để expose |
 | Đồng bộ offline đầy đủ | Chưa hoàn thành | Không có offline outbox; sau reconnect cần tải thêm lịch sử nếu thiếu hơn 50 tin |
 
 ### Cập nhật sửa lỗi ngày 30/09/2026
@@ -117,19 +172,11 @@ npm run build
 
 Kết quả được ghi theo từng mốc ở trên. Kiểm thử fixture HTTP + MQTT WebSocket không thay thế xác nhận MySQL transaction, Mosquitto ACL, avatar storage hoặc Django worker chạy end-to-end trên backend của nhóm.
 
-## Việc cần phối hợp với BE
+## Việc còn lại / phối hợp nghiệm thu
 
-1. Chốt và cung cấp WebSocket broker URL/credentials/ACL; kiểm tra hai user với Django worker thật.
-2. Bổ sung chi tiết hội thoại và thu hồi lời mời đã gửi để bỏ các thao tác thủ công còn lại.
-3. Bổ sung đăng nhập/xác thực và gắn user identity với quyền API/MQTT. Hiện FE chỉ chọn user của môi trường phát triển.
-4. Bổ sung delivery receipt, typing và full offline sync; read receipt đã được triển khai và lưu trong `MessageReceipt`.
-5. Kiểm tra avatar upload/delete và phục vụ `/media` trên môi trường thật; kiểm tra history 403, retry khi ACK mất và Last Will.
-6. Kiểm tra presence hai chiều trên hai browser, xác nhận cùng broker và đúng subscription topic; đánh giá quản lý nhiều phiên. Nếu cùng user mở nhiều tab, topic status hiện dùng chung một topic/user nên một tab ngắt có thể báo offline cho cả user.
-
-## Các bước đề xuất tiếp theo
-
-1. Bổ sung xác nhận đã nhận, typing và đồng bộ đầy đủ khi ngoại tuyến.
-2. Kiểm tra presence đa browser như checklist phối hợp BE.
-3. Kiểm thử HTTP/MQTT client của frontend với backend đang chạy của nhóm.
+1. Trước khi bảo vệ MQTT: thống nhất thay broker/config, triển khai Dynamic Security hoặc ACL, credential theo client và kiểm thử quyền publish/subscribe; HTTP authentication hiện không có tác dụng với MQTT v1.
+2. Sau khi broker có danh tính/ACL: triển khai MQTT authorization, thu hồi khi kick/logout, presence multi-session và realtime group invalidation; typing hiện tại chưa được bảo vệ bởi ACL.
+3. Sao lưu database, áp dụng migration trên môi trường thử nghiệm/live có kiểm soát, rồi dùng mapping JSON đã được chủ dự án duyệt để liên kết profile và gán owner cũ.
+4. Chạy nghiệm thu với MySQL/broker thực tế, HTTPS/reverse proxy, avatar storage, retry/Last Will và kiểm tra hai browser; bổ sung shared-store rate limiting cho đăng ký/đăng nhập.
 
 Chi tiết cấu trúc FE, cấu hình và fixture: [frontend/README.md](frontend/README.md).

@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.db import models
 
 
@@ -18,6 +19,15 @@ class User(models.Model):
         editable=False,
         db_column="user_id",
     )
+    auth_user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="chat_profile",
+        null=True,
+        blank=True,
+    )
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    presence_version = models.PositiveBigIntegerField(default=0)
     username = models.CharField(
         max_length=100,
         unique=True,
@@ -160,6 +170,16 @@ class Conversation(models.Model):
         blank=True,
         db_column="name",
     )
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="owned_conversations",
+    )
+    description = models.TextField(blank=True)
+    is_archived = models.BooleanField(default=False)
+    version = models.PositiveBigIntegerField(default=1)
     conversation_type = models.CharField(
         max_length=10,
         choices=ConversationType.choices,
@@ -179,6 +199,10 @@ class Conversation(models.Model):
 
 
 class ConversationMember(models.Model):
+    class Role(models.TextChoices):
+        ADMIN = "ADMIN", "Admin"
+        MEMBER = "MEMBER", "Member"
+
     conversation = models.ForeignKey(
         Conversation,
         on_delete=models.CASCADE,
@@ -195,6 +219,13 @@ class ConversationMember(models.Model):
         auto_now_add=True,
         db_column="joined_at",
     )
+    role = models.CharField(
+        max_length=10,
+        choices=Role.choices,
+        default=Role.MEMBER,
+    )
+    is_active = models.BooleanField(default=True)
+    left_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "conversation_members"
@@ -217,6 +248,7 @@ class RoomInvitation(models.Model):
         PENDING = "PENDING", "Pending"
         ACCEPT = "ACCEPT", "Accepted"
         REJECT = "REJECT", "Rejected"
+        CANCELLED = "CANCELLED", "Cancelled"
 
     invitation_id = models.UUIDField(
         primary_key=True,

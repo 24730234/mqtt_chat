@@ -80,6 +80,39 @@ test('read commands publish only watched message IDs and accept valid read event
   assert.equal(t.events.length, 1);
   t.transport.close();
 });
+test('typing is published without retention and only valid group member events are forwarded', () => {
+  const t = setup();
+  const memberId = '44444444-4444-4444-8444-444444444444';
+  t.transport.watch(cid, [uid, memberId]);
+  t.client.emit('connect');
+  const topic = `chat/conversations/${cid}/event/typing`;
+  assert.ok(t.client.subscriptions.flat().includes(topic));
+
+  assert.equal(t.transport.typing(cid, true), true);
+  const publication = t.client.publications.find(item => item.topic === topic);
+  assert.deepEqual(JSON.parse(publication.payload), {
+    type: 'TYPING',
+    conversation_id: cid,
+    user_id: uid,
+    is_typing: true,
+  });
+  assert.equal(publication.options.retain, false);
+
+  const event = {
+    type: 'TYPING',
+    conversation_id: cid,
+    user_id: memberId,
+    is_typing: true,
+  };
+  t.client.emit('message', topic, Buffer.from(JSON.stringify(event)));
+  assert.deepEqual(t.events, [event]);
+  t.client.emit('message', topic, Buffer.from(JSON.stringify({ ...event, user_id: '55555555-5555-4555-8555-555555555555' })));
+  t.client.emit('message', topic, Buffer.from(JSON.stringify({ ...event, user_id: uid })));
+  assert.equal(t.events.length, 1);
+  t.transport.unwatch(cid);
+  assert.ok(t.client.unsubscribed.includes(topic));
+  t.transport.close();
+});
 test('inbox message notifications include sender and reach a client before it watches the conversation', () => {
   const t = setup();
   t.client.emit('connect');
@@ -129,6 +162,7 @@ test('unwatch removes denied conversation topic, retains shared presence, ignore
   assert.deepEqual(t.client.unsubscribed, [
     `chat/conversations/${cid}/event/message_created`,
     `chat/conversations/${cid}/event/message_read`,
+    `chat/conversations/${cid}/event/typing`,
   ]);
   t.client.emit('message', `chat/conversations/${cid}/event/message_created`, Buffer.from(JSON.stringify({ ...accepted, type: 'MESSAGE_CREATED', sender_id: uid, content: 'late' })));
   assert.equal(t.events.length, 0);

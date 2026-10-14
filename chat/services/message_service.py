@@ -78,6 +78,8 @@ class MessageService:
             raise NotFoundError("conversation not found")
         if not self.conversations.is_member(conversation, sender):
             raise PermissionError("sender is not a member of this conversation")
+        if conversation.is_archived:
+            raise ConflictError("conversation is archived")
 
         existing = self.messages.get_by_sender_and_client_id(
             sender, client_message_id
@@ -99,6 +101,8 @@ class MessageService:
                     raise PermissionError(
                         "sender is not a member of this conversation"
                     )
+                if conversation.is_archived:
+                    raise ConflictError("conversation is archived")
 
                 # Recheck under the conversation lock before allocating a sequence.
                 existing = self.messages.get_by_sender_and_client_id(

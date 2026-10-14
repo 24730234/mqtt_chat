@@ -21,15 +21,15 @@ class ConversationRepository:
             .values("created_at")[:1]
         )
         conversations = list(
-            Conversation.objects.filter(members__user=user)
+            Conversation.objects.filter(members__user=user, members__is_active=True)
             .annotate(last_message_at=Subquery(latest_message_at))
             .order_by(F("last_message_at").desc(nulls_last=True), "-created_at")
             .prefetch_related(
                 Prefetch(
                     "members",
-                    queryset=ConversationMember.objects.select_related("user").order_by(
-                        "user__username"
-                    ),
+                    queryset=ConversationMember.objects.filter(is_active=True)
+                    .select_related("user")
+                    .order_by("user__username"),
                 )
             )
         )
@@ -94,10 +94,15 @@ class ConversationRepository:
                 conversation_type=Conversation.ConversationType.PRIVATE,
             )
             .annotate(
-                member_count=Count("members", distinct=True),
+                member_count=Count(
+                    "members", filter=Q(members__is_active=True), distinct=True
+                ),
                 matching_member_count=Count(
                     "members",
-                    filter=Q(members__user_id__in=member_ids),
+                    filter=Q(
+                        members__user_id__in=member_ids,
+                        members__is_active=True,
+                    ),
                     distinct=True,
                 ),
             )
@@ -105,10 +110,11 @@ class ConversationRepository:
             .first()
         )
 
-    def create(self, conversation_type, users, name=None):
+    def create(self, conversation_type, users, name=None, owner=None):
         conversation = Conversation.objects.create(
             conversation_type=conversation_type,
             name=name,
+            owner=owner,
         )
         ConversationMember.objects.bulk_create(
             [
@@ -122,6 +128,7 @@ class ConversationRepository:
         return ConversationMember.objects.filter(
             conversation=conversation,
             user=user,
+            is_active=True,
         ).exists()
 
     def messages(self, conversation, before_seq=None, limit=50):

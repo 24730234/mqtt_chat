@@ -57,14 +57,18 @@ class ChatService:
     def delete_friend(self, user_id, friend_id):
         return self.user_service.delete_friend(user_id, friend_id)
 
-    def send_room_invitation(self, sender_id, recipient_id, conversation_id):
+    def send_room_invitation(
+        self, sender_id, recipient_id, conversation_id, expected_version=None
+    ):
         return self.conversation_service.send_room_invitation(
-            sender_id, recipient_id, conversation_id
+            sender_id, recipient_id, conversation_id, expected_version
         )
 
-    def respond_to_room_invitation(self, invitation_id, responder_id, status):
+    def respond_to_room_invitation(
+        self, invitation_id, responder_id, status, expected_version=None
+    ):
         return self.conversation_service.respond_to_room_invitation(
-            invitation_id, responder_id, status
+            invitation_id, responder_id, status, expected_version
         )
 
     def create_conversation(
@@ -85,6 +89,56 @@ class ChatService:
 
     def list_conversations(self, user_id):
         return self.conversation_service.list_conversations(user_id)
+
+    def get_group_details(self, conversation_id, user_id):
+        return self.conversation_service.get_group_details(conversation_id, user_id)
+
+    def update_group(
+        self, conversation_id, user_id, expected_version, *, name=None, description=None
+    ):
+        return self.conversation_service.update_group(
+            conversation_id,
+            user_id,
+            expected_version,
+            name=name,
+            description=description,
+        )
+
+    def cancel_room_invitation(self, invitation_id, user_id, expected_version):
+        return self.conversation_service.cancel_room_invitation(
+            invitation_id, user_id, expected_version
+        )
+
+    def remove_group_member(
+        self, conversation_id, target_id, actor_id, expected_version
+    ):
+        return self.conversation_service.remove_group_member(
+            conversation_id, target_id, actor_id, expected_version
+        )
+
+    def leave_group(self, conversation_id, user_id, expected_version):
+        return self.conversation_service.leave_group(
+            conversation_id, user_id, expected_version
+        )
+
+    def set_member_role(
+        self, conversation_id, target_id, actor_id, role, expected_version
+    ):
+        return self.conversation_service.set_member_role(
+            conversation_id, target_id, actor_id, role, expected_version
+        )
+
+    def transfer_ownership(
+        self, conversation_id, target_id, actor_id, expected_version
+    ):
+        return self.conversation_service.transfer_ownership(
+            conversation_id, target_id, actor_id, expected_version
+        )
+
+    def archive_group(self, conversation_id, actor_id, expected_version):
+        return self.conversation_service.archive_group(
+            conversation_id, actor_id, expected_version
+        )
 
     def load_history(self, conversation_id, user_id, before_seq=None, limit=50):
         return self.conversation_service.load_history(

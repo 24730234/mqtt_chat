@@ -12,7 +12,11 @@ class InvitationRepository:
 
     def list_for_user(self, user):
         pending = Invitation.objects.filter(
-            status=Invitation.InvitationStatus.PENDING
+            status=Invitation.InvitationStatus.PENDING,
+            user__auth_user__isnull=False,
+            user__auth_user__is_active=True,
+            sender__auth_user__isnull=False,
+            sender__auth_user__is_active=True,
         ).select_related("sender", "user")
         return {
             "incoming": pending.filter(user=user).order_by("-send_time"),

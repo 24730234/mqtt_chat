@@ -8,16 +8,16 @@ import './live.css';
 import './read-receipts.css';
 
 const env = import.meta.env;
-const initialConfig = { apiBase: env.VITE_API_BASE || '/api', mqttUrl: env.VITE_MQTT_URL || 'ws://127.0.0.1:9001', mqttUsername: '', mqttPassword: '' };
+const initialConfig = { apiBase: '/api', mqttUrl: env.VITE_MQTT_URL || 'ws://127.0.0.1:9001', mqttUsername: '', mqttPassword: '' };
 const configKey = 'mach-live-connection-v1';
+const authChannelName = 'mach-auth-v1';
 const noIds = [];
 function restoreConfig() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(configKey) || '{}');
-    return { ...initialConfig, ...(typeof saved.apiBase === 'string' ? { apiBase: saved.apiBase } : {}), ...(typeof saved.mqttUrl === 'string' ? { mqttUrl: saved.mqttUrl } : {}) };
+    return { ...initialConfig, ...(typeof saved.mqttUrl === 'string' ? { mqttUrl: saved.mqttUrl } : {}) };
   } catch { return initialConfig; }
 }
-const localPreview = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 const clock = value => new Date(value).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 const sortConversations = conversations => [...conversations].sort((a, b) => {
   const aLastMessage = a.last_message ? Date.parse(a.last_message.created_at) : null;
@@ -71,20 +71,138 @@ function UserSearch({ api, apiBase, exclude, excludeIds = noIds, onSelect, selec
 export default function LiveApp({ onDemo }) {
   const [config, setConfig] = useState(restoreConfig);
   useEffect(() => {
-    try { sessionStorage.setItem(configKey, JSON.stringify({ apiBase: config.apiBase, mqttUrl: config.mqttUrl })); } catch { /* Connection stays usable when storage is unavailable. */ }
-  }, [config.apiBase, config.mqttUrl]);
-  const [session, setSession] = useState(null);
+    try { sessionStorage.setItem(configKey, JSON.stringify({ mqttUrl: config.mqttUrl })); } catch { /* Connection stays usable when storage is unavailable. */ }
+  }, [config.mqttUrl]);
+  const api = useMemo(() => createApi(config.apiBase), [config.apiBase]);
+  const [sessionUser, setSessionUser] = useState(null);
+  const [sessionState, setSessionState] = useState('loading');
+  const [bootstrapError, setBootstrapError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    const channel = typeof BroadcastChannel === 'undefined'
+      ? null
+      : new BroadcastChannel(authChannelName);
+    const unauthenticated = () => {
+      if (!active) return;
+      setSessionUser(null);
+      setSessionState('anonymous');
+    };
+    api.setUnauthorizedHandler(unauthenticated);
+    if (channel) channel.onmessage = event => {
+      if (event.data?.type === 'logout') unauthenticated();
+    };
+    api.csrf()
+      .then(() => api.me())
+      .then(result => {
+        if (active) {
+          setSessionUser(result.user);
+          setSessionState('authenticated');
+        }
+      })
+      .catch(error => {
+        if (!active) return;
+        if (error.status === 401) {
+          setSessionState('anonymous');
+        } else {
+          setBootstrapError(error.message);
+          setSessionState('unavailable');
+        }
+      });
+    return () => {
+      active = false;
+      channel?.close();
+      api.setUnauthorizedHandler(null);
+    };
+  }, [api]);
+
+  async function logoutCurrentSession() {
+    try {
+      await api.logout();
+    } finally {
+      setSessionUser(null);
+      setSessionState('anonymous');
+      if (typeof BroadcastChannel !== 'undefined') {
+        const channel = new BroadcastChannel(authChannelName);
+        channel.postMessage({ type: 'logout' });
+        channel.close();
+      }
+    }
+  }
+
+  if (sessionState === 'loading') {
+    return <main className="live-setup"><p role="status">Đang khôi phục phiên đăng nhập…</p></main>;
+  }
+  if (sessionState === 'unavailable') {
+    return <main className="live-setup"><ErrorBox error={bootstrapError}/><button className="primary-button" onClick={() => location.reload()}>Thử lại</button><button className="text-button" onClick={onDemo}><ArrowLeft size={15}/> Xem bản demo</button></main>;
+  }
+  if (sessionUser) {
+    return <Workspace key={`${config.apiBase}:${sessionUser.user_id}`} initialUser={sessionUser} config={config} api={api} onExit={logoutCurrentSession} onDemo={onDemo}/>;
+  }
+  return <AuthScreen
+    api={api}
+    mqttUrl={config.mqttUrl}
+    onMqttUrlChange={mqttUrl => setConfig(previous => ({ ...previous, mqttUrl }))}
+    onAuthenticated={user => { setSessionUser(user); setSessionState('authenticated'); }}
+    onDemo={onDemo}
+  />;
+}
+
+function AuthScreen({ api, mqttUrl, onMqttUrlChange, onAuthenticated, onDemo }) {
+  const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const api = useMemo(() => createApi(config.apiBase), [config.apiBase]);
-  async function create(event) {
-    event.preventDefault(); setBusy(true); setError('');
-    try { const user = await api.createUser({ username: username.trim() }); setSession(user); }
-    catch (error) { setError(error.message); } finally { setBusy(false); }
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      if (mode === 'register') {
+        await api.register({
+          username: username.trim(),
+          password,
+          password_confirm: passwordConfirm,
+        });
+        setMode('login');
+        setPassword('');
+        setPasswordConfirm('');
+        setError('Đăng ký thành công. Hãy đăng nhập.');
+      } else {
+        const result = await api.login({
+          username: username.trim(),
+          password,
+          remember_me: rememberMe,
+        });
+        onAuthenticated(result.user);
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
   }
-  if (session) return <Workspace key={`${config.apiBase}:${session.user_id}`} initialUser={session} config={config} api={api} onExit={() => setSession(null)} onDemo={onDemo}/>;
-  return <main className="live-setup"><div className="setup-brand"><span className="brand-mark"><Radio size={28}/></span><span className="wordmark">mạch<span>•</span></span><button className="text-button" onClick={onDemo}><ArrowLeft size={15}/> Xem bản demo</button></div><div className="setup-grid"><section className="setup-intro"><span className="eyebrow">KHÔNG GIAN KẾT NỐI</span><h1>Chuyện trò thật.<br/>Kết nối ngay.</h1><p>Chọn người dùng của nhóm và bắt đầu trò chuyện trên backend MQTT Chat.</p><div className="setup-note"><Info size={19}/><p>Phiên tích hợp dành cho nhóm phát triển. Backend hiện dùng UUID để xác định người dùng, chưa có đăng nhập hoặc xác thực tài khoản.</p></div><details><summary>Cấu hình kết nối</summary><label className="form-label">API base<input value={config.apiBase} onChange={e => setConfig({ ...config, apiBase: e.target.value })}/></label><label className="form-label">MQTT WebSocket URL<input value={config.mqttUrl} onChange={e => setConfig({ ...config, mqttUrl: e.target.value })}/></label><label className="form-label">MQTT username<input autoComplete="off" value={config.mqttUsername} onChange={e => setConfig({ ...config, mqttUsername: e.target.value })}/></label><label className="form-label">MQTT password<input type="password" autoComplete="off" value={config.mqttPassword} onChange={e => setConfig({ ...config, mqttPassword: e.target.value })}/></label><p className="muted">Địa chỉ API/MQTT được nhớ trong tab này khi tải lại. Username/password broker chỉ giữ trong bộ nhớ. Broker cần listener WebSocket và ACL phù hợp.</p></details></section><section className="setup-card"><h2>Chọn người dùng</h2>{localPreview && <div className="fixture-choice"><button type="button" className="text-button" onClick={() => { setConfig({ ...initialConfig, apiBase: "http://127.0.0.1:18000/api", mqttUrl: "ws://127.0.0.1:19001" }); setError(""); }}>Dùng server test</button><small>quang_fixture / thien_fixture · Cần bật server test local</small></div>}<p className="muted">Tìm username đã được tạo trên backend.</p><UserSearch api={api} apiBase={config.apiBase} onSelect={setSession}/><div className="setup-or">HOẶC TẠO NGƯỜI DÙNG</div><form onSubmit={create}><label className="form-label">Username mới<input required maxLength={100} value={username} onChange={e => setUsername(e.target.value)} placeholder="Ví dụ: quang_fe"/></label><ErrorBox error={error}/><button className="primary-button" disabled={busy || !username.trim()}>{busy ? 'Đang tạo…' : 'Tạo người dùng và tiếp tục'}<UserPlus size={17}/></button></form></section></div></main>;
+  return <main className="live-setup">
+    <div className="setup-brand"><span className="brand-mark"><Radio size={28}/></span><span className="wordmark">mạch<span>•</span></span><button className="text-button" onClick={onDemo}><ArrowLeft size={15}/> Xem bản demo</button></div>
+    <div className="setup-grid">
+      <section className="setup-intro"><span className="eyebrow">KHÔNG GIAN KẾT NỐI</span><h1>Chuyện trò thật.<br/>Kết nối ngay.</h1><p>Đăng nhập bằng tài khoản Mạch để mở các cuộc trò chuyện của bạn.</p><div className="setup-note"><Info size={19}/><p>Mỗi tài khoản có hồ sơ chat riêng. Phiên HTTP dùng cookie HttpOnly và thời hạn tuyệt đối.</p></div><div className="setup-note broker-warning"><Info size={19}/><p>MQTT đang giữ giao thức v1 hiện có theo cấu hình được yêu cầu; broker chưa được bảo vệ bằng Dynamic Security. Chỉ dùng dữ liệu phát triển, không xem đăng nhập HTTP là bảo vệ MQTT.</p></div><details><summary>Cấu hình kết nối</summary><label className="form-label">MQTT WebSocket URL<input value={mqttUrl} onChange={event => onMqttUrlChange(event.target.value)}/></label><p className="muted">API sử dụng cùng origin qua proxy `/api`; không nhập API host khác. MQTT broker hiện dùng cấu hình môi trường phát triển.</p></details></section>
+      <section className="setup-card">
+        <h2>{mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}</h2>
+        <form onSubmit={submit}>
+          <label className="form-label">Username<input required maxLength={100} autoComplete="username" value={username} onChange={event => setUsername(event.target.value)} placeholder="Tên người dùng"/></label>
+          <label className="form-label">Mật khẩu<input required type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={event => setPassword(event.target.value)}/></label>
+          {mode === 'register' && <label className="form-label">Nhập lại mật khẩu<input required type="password" autoComplete="new-password" value={passwordConfirm} onChange={event => setPasswordConfirm(event.target.value)}/></label>}
+          {mode === 'login' && <label className="remember-option"><input type="checkbox" checked={rememberMe} onChange={event => setRememberMe(event.target.checked)}/> Ghi nhớ đăng nhập tối đa 7 ngày</label>}
+          <ErrorBox error={error}/>
+          <button className="primary-button" disabled={busy || !username.trim() || !password}>{busy ? 'Đang xử lý…' : mode === 'login' ? 'Đăng nhập' : 'Đăng ký'}</button>
+        </form>
+        <button className="text-button auth-mode-toggle" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập'}</button>
+      </section>
+    </div>
+  </main>;
 }
 function Workspace({ initialUser, api, config, onExit, onDemo }) {
   const [user, setUser] = useState(initialUser);
@@ -104,6 +222,8 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
   const [transportInitialized, setTransportInitialized] = useState(false);
   const [connectionError, setConnectionError] = useState('');
   const [error, setError] = useState('');
+  const [toast, setToast] = useState(null);
+  const [typingUsers, setTypingUsers] = useState({});
   const [loading, setLoading] = useState({});
   const [older, setOlder] = useState({});
   const [historyErrors, setHistoryErrors] = useState({});
@@ -126,6 +246,10 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
   const seenEvents = useRef(new Set());
   const pendingReads = useRef(new Map());
   const queuedReads = useRef(new Set());
+  const typingTimers = useRef(new Map());
+  const localTypingTimer = useRef(null);
+  const localTypingConversation = useRef(null);
+  const lastTypingSentAt = useRef(0);
   catalogRef.current = conversations; activeRef.current = active;
   const current = conversations.find(c => c.conversation_id === active);
   const draft = drafts[active] || { text: '', reply: null };
@@ -157,6 +281,34 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
     }
     flushReadQueue();
   }
+  function stopTyping(conversationId = active) {
+    clearTimeout(localTypingTimer.current);
+    localTypingTimer.current = null;
+    const target = localTypingConversation.current || conversationId;
+    if (target) transport.current?.typing(target, false);
+    localTypingConversation.current = null;
+    lastTypingSentAt.current = 0;
+  }
+  function updateDraftText(text) {
+    editDraft({ text });
+    if (!text.trim()) {
+      stopTyping();
+      return;
+    }
+    if (!active) return;
+    if (localTypingConversation.current !== active || Date.now() - lastTypingSentAt.current >= 1000) {
+      transport.current?.typing(active, true);
+      localTypingConversation.current = active;
+      lastTypingSentAt.current = Date.now();
+    }
+    clearTimeout(localTypingTimer.current);
+    localTypingTimer.current = setTimeout(() => stopTyping(active), 1800);
+  }
+  useEffect(() => () => {
+    stopTyping(active);
+    typingTimers.current.forEach(timer => clearTimeout(timer));
+    typingTimers.current.clear();
+  }, [active]);
   useEffect(() => {
     setSearchResults([]); setSearchError('');
     const term = search.trim();
@@ -175,6 +327,11 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
     }, 300);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [search, active, api, user.user_id]);
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timeout = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timeout);
+  }, [toast]);
   function watch(c) { transport.current?.watch(c.conversation_id, c.members.map(member => member.user_id)); }
   async function loadHistory(c, before) {
     const id = c.conversation_id;
@@ -217,7 +374,36 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
         onPresence: (id, status) => setPresence(prev => ({ ...prev, [id]: status })),
         onReady: () => { flushReadQueue(); refreshCatalogRef.current?.(); },
         onEvent: event => {
-          if (event.type === 'MESSAGE_ACCEPTED') setMessages(prev => reconcileAccepted(prev, event, user.user_id));
+          if (event.type === 'TYPING') {
+            const key = `${event.conversation_id}:${event.user_id}`;
+            clearTimeout(typingTimers.current.get(key));
+            if (!event.is_typing) {
+              typingTimers.current.delete(key);
+              setTypingUsers(previous => {
+                const members = { ...(previous[event.conversation_id] || {}) };
+                delete members[event.user_id];
+                return { ...previous, [event.conversation_id]: members };
+              });
+              return;
+            }
+            const member = catalogRef.current.find(item => item.conversation_id === event.conversation_id)
+              ?.members.find(item => item.user_id === event.user_id);
+            setTypingUsers(previous => ({
+              ...previous,
+              [event.conversation_id]: {
+                ...(previous[event.conversation_id] || {}),
+                [event.user_id]: member?.username || 'Thành viên',
+              },
+            }));
+            typingTimers.current.set(key, setTimeout(() => {
+              typingTimers.current.delete(key);
+              setTypingUsers(previous => {
+                const members = { ...(previous[event.conversation_id] || {}) };
+                delete members[event.user_id];
+                return { ...previous, [event.conversation_id]: members };
+              });
+            }, 3500));
+          } else if (event.type === 'MESSAGE_ACCEPTED') setMessages(prev => reconcileAccepted(prev, event, user.user_id));
           else if (event.type === 'MESSAGE_CREATED' && event.notification_only) {
             if (!catalogRef.current.some(conversation => conversation.conversation_id === event.conversation_id)) {
               refreshCatalogRef.current?.();
@@ -322,6 +508,7 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
     return () => observer.disconnect();
   }, [active, messages, searchResults, search, verified, user.user_id]);
   function select(c) {
+    setModule('chats');
     setActive(c.conversation_id); setSearch(''); setDetails(false); shouldScroll.current = true;
     loadHistory(c);
   }
@@ -340,10 +527,18 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
     setConversations(prev => [...prev.filter(c => c.conversation_id !== hiddenConversation.conversation_id), hiddenConversation]);
     select(hiddenConversation); setHiddenConversation(null);
   }
-  function addConversation(c) {
+  function addConversation(c, invitedUsernames = []) {
     setModule('chats');
     setConversations(prev => sortConversations([c, ...prev.filter(item => item.conversation_id !== c.conversation_id)]));
     select(c); setModal(null);
+    if (c.type === 'GROUP') {
+      setToast({
+        type: 'success',
+        message: invitedUsernames.length
+          ? `Đã tạo nhóm "${c.name}" và gửi lời mời đến ${invitedUsernames.join(', ')}.`
+          : `Đã tạo nhóm "${c.name}".`,
+      });
+    }
     api.listConversations(user.user_id)
       .then(result => {
         const refreshed = result.conversations.map(conversation => ({
@@ -390,6 +585,7 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
   function send(event) {
     event.preventDefault();
     if (!draft.text.trim() || connection !== 'connected' || !verified[active]) return;
+    stopTyping();
     const id = crypto.randomUUID();
     const message = { message_id: null, client_message_id: id, conversation_id: active, sender_id: user.user_id, content: draft.text.trim(), created_at: new Date().toISOString(), seq: null, reply_to_message_id: draft.reply?.message_id || null, reply_to: draft.reply ? { message_id: draft.reply.message_id, content: draft.reply.content } : null };
     shouldScroll.current = true; publish(message); editDraft({ text: '', reply: null });
@@ -409,23 +605,105 @@ function Workspace({ initialUser, api, config, onExit, onDemo }) {
     <nav className="rail"><span className="brand-mark"><Radio size={26}/></span><div className="rail-links"><button className={`icon-button ${module === 'chats' ? 'active' : ''}`} aria-label="Danh sách hội thoại" onClick={() => navigateModule('chats')}><MessageCircle size={23}/><span className="rail-label">Tin nhắn</span></button><button className={`icon-button ${module === 'friends' ? 'active' : ''}`} aria-label="Bạn bè" onClick={() => navigateModule('friends')}><Users size={23}/><span className="rail-label">Bạn bè</span></button><button className={`icon-button ${module === 'invitations' ? 'active' : ''}`} aria-label="Lời mời" onClick={() => navigateModule('invitations')}><Mail size={22}/>{incomingInvitationCount > 0 && <b className="rail-badge">{incomingInvitationCount}</b>}<span className="rail-label">Lời mời</span></button></div><div className="rail-bottom"><button className="icon-button" aria-label="Đổi người dùng" onClick={onExit}><LogOut size={21}/></button><button className="profile-button" aria-label="Hồ sơ của bạn" onClick={() => setModal('profile')}><Avatar user={user} apiBase={config.apiBase}/></button></div></nav>
     <aside className="sidebar"><div className="workspace"><div><span className="wordmark">mạch<span>•</span></span><span className="workspace-caption">{user.username}</span></div><button className="demo-tag" onClick={onDemo}>VỀ DEMO</button></div><div className="sidebar-title"><h1>Tin nhắn<span>{conversations.length}</span></h1><button className="icon-button new-chat" aria-label="Cuộc trò chuyện mới" onClick={() => setModal('new')}><Plus size={20}/></button></div><label className="search-box"><Search size={17}/><input placeholder="Tìm hội thoại..." aria-label="Tìm hội thoại" value={query} onChange={e => setQuery(e.target.value)}/></label><div className="filters">{[['all','Tất cả'],['unread','Chưa đọc'],['groups','Nhóm']].map(([id,label]) => <button key={id} className={filter === id ? 'selected' : ''} onClick={() => setFilter(id)}>{label}</button>)}</div><div className="catalog-note">Danh sách đồng bộ từ máy chủ.<button onClick={() => setModal('open')}>Mở bằng mã UUID</button></div><div className="conversation-list">{conversations.filter(c => name(c).toLowerCase().includes(query.toLowerCase()) && (filter !== 'groups' || c.type === 'GROUP') && (filter !== 'unread' || c.unread)).map(c => { const last = messages.filter(m => m.conversation_id === c.conversation_id).at(-1) || c.last_message; return <button className={`conversation ${c.conversation_id === active ? 'selected' : ''} ${c.unread ? 'unread' : ''}`} key={c.conversation_id} onClick={() => select(c)}><Avatar user={{ name: name(c), ...(c.type === 'PRIVATE' ? c.members.find(m => m.user_id !== user.user_id) : {}) }} apiBase={config.apiBase}/><span className="conversation-copy"><span className="conversation-top"><strong>{name(c)}</strong>{last && <time>{clock(last.created_at)}</time>}</span><span className="conversation-preview"><span>{historyStatus[c.conversation_id] === 404 ? 'Không còn trên server' : historyStatus[c.conversation_id] === 403 ? 'Không có quyền truy cập' : last?.content || (loading[c.conversation_id] ? 'Đang tải…' : 'Mở cuộc trò chuyện')}</span>{!!c.unread && <b className="unread-count">{c.unread}</b>}</span></span></button>; })}{!conversations.length && <div className="empty-list"><MessageCircle size={28}/><p>Chưa có hội thoại.<br/>Bắt đầu với một người bạn.</p><button onClick={() => setModal('new')}>Trò chuyện mới</button></div>}</div><div className={`local-status ${connection !== 'connected' ? 'disconnected' : ''}`}><i/>{statusName}</div></aside>
     <main className="chat-panel"><div className="live-connection"><Radio size={15}/><span>{statusName}</span><span>{config.apiBase === "http://127.0.0.1:18000/api" ? "Server test · Dữ liệu mẫu" : "Kết nối backend"}</span></div><ErrorBox error={connectionError}/>{error && <div className="dismiss-error"><ErrorBox error={error}/><button className="icon-button" aria-label="Đóng thông báo" onClick={() => setError('')}><X size={17}/></button></div>}
-      {module === 'friends' ? <FriendsPage api={api} config={config} user={user} presence={presence} presenceReady={transportInitialized} watchPresence={watchPresence} onBack={() => navigateModule('chats')} onConversation={conversationOpened} onInvitationSent={() => api.invitations(user.user_id).then(result => setIncomingInvitationCount(result.incoming.length + result.room_incoming.length)).catch(error => setError(error.message))} onInvitations={() => navigateModule('invitations')}/> : module === 'invitations' ? <InvitationsPage api={api} config={config} user={user} onBack={() => navigateModule('chats')} onChanged={result => setIncomingInvitationCount(result.incoming.length + result.room_incoming.length)} onRoomAccepted={refreshConversationCatalog}/> : current ? <><header className="chat-header"><button className="icon-button live-back" aria-label="Quay lại danh sách" onClick={() => setActive(null)}><ArrowLeft size={20}/></button><Avatar user={{ name: name(current) }}/><div className="chat-heading"><h2>{name(current)}</h2><p>{current.type === 'UNKNOWN' ? 'Đã mở bằng mã hội thoại' : `${members.length} thành viên`} · Lịch sử từ backend</p></div><button className="icon-button" aria-label="Thông tin hội thoại" onClick={() => setDetails(!details)}><Info size={20}/></button><button className="icon-button" aria-label="Làm mới lịch sử" disabled={loading[active]} onClick={() => loadHistory(current)}><RefreshCw size={18}/></button></header>
-      {details && <div className="live-details"><strong>Mã hội thoại</strong><code>{active}</code><button className="text-button" onClick={async () => { try { await navigator.clipboard.writeText(active); setError('Đã sao chép mã hội thoại.'); } catch { setError('Bạn có thể chọn và sao chép mã hiển thị phía trên.'); } }}>Sao chép mã</button><div className="live-members">{members.map(member => { const p = sender(member.user_id); return <div key={member.user_id}><Avatar user={p} apiBase={config.apiBase}/><span>{p.username}<small>{p.status === 'online' ? 'Online' : 'Offline'}</small></span></div>; })}</div>{current.type === 'UNKNOWN' && <p>Danh sách trên chỉ gồm bạn và người gửi trong trang lịch sử đã tải. BE chưa có API thông tin hội thoại.</p>}</div>}
+      {module === 'friends' ? <FriendsPage api={api} config={config} user={user} presence={presence} presenceReady={transportInitialized} watchPresence={watchPresence} onBack={() => navigateModule('chats')} onConversation={conversationOpened} onInvitationSent={() => api.invitations(user.user_id).then(result => setIncomingInvitationCount(result.incoming.length + result.room_incoming.length)).catch(error => setError(error.message))} onInvitations={() => navigateModule('invitations')}/> : module === 'invitations' ? <InvitationsPage api={api} config={config} user={user} onBack={() => navigateModule('chats')} onChanged={result => setIncomingInvitationCount(result.incoming.length + result.room_incoming.length)} onRoomAccepted={refreshConversationCatalog}/> : current ? <><header className="chat-header"><button className="icon-button live-back" aria-label="Quay lại danh sách" onClick={() => setActive(null)}><ArrowLeft size={20}/></button><Avatar user={{ name: name(current) }}/><div className="chat-heading"><h2>{name(current)}</h2>{current.type !== 'PRIVATE' && <p>{current.type === 'UNKNOWN' ? 'Đã mở bằng mã hội thoại' : `${members.length} thành viên`}</p>}</div><button className="icon-button" aria-label="Thông tin hội thoại" onClick={() => setDetails(!details)}><Info size={20}/></button><button className="icon-button" aria-label="Làm mới lịch sử" disabled={loading[active]} onClick={() => loadHistory(current)}><RefreshCw size={18}/></button></header>
+      {details && <aside className="live-details" aria-label="Thông tin hội thoại">
+        <header className="details-drawer-heading"><div><small>THÔNG TIN HỘI THOẠI</small><h2>{current.type === 'GROUP' ? 'Quản lý nhóm' : 'Chi tiết hội thoại'}</h2></div><button className="icon-button" aria-label="Đóng thông tin hội thoại" onClick={() => setDetails(false)}><X size={19}/></button></header>
+        <div className="details-hero"><Avatar user={{ name: name(current) }} large/><div><strong>{name(current)}</strong><span>{current.type === 'GROUP' ? `${members.length} thành viên đã tham gia` : 'Cuộc trò chuyện cá nhân'}</span></div></div>
+        <section className="details-id-card"><div><small>MÃ HỘI THOẠI</small><code>{active}</code></div><button className="text-button" onClick={async () => { try { await navigator.clipboard.writeText(active); setToast({ type: 'success', message: 'Đã sao chép mã hội thoại.' }); } catch { setToast({ type: 'warning', message: 'Bạn có thể chọn và sao chép mã hiển thị phía trên.' }); } }}>Sao chép</button></section>
+        {current.type === 'GROUP' ? <GroupDetailsPanel groupId={active} user={user} api={api} apiBase={config.apiBase} onChanged={refreshConversationCatalog} onToast={message => setToast({ type: 'success', message })} onLeave={() => { setMessages(prev => prev.filter(message => message.conversation_id !== active)); setConversations(prev => prev.filter(conversation => conversation.conversation_id !== active)); transport.current?.unwatch(active); setVerified(prev => ({ ...prev, [active]: false })); setActive(null); setDetails(false); }}/> : <div className="live-members">{members.map(member => { const p = sender(member.user_id); return <div key={member.user_id}><Avatar user={p} apiBase={config.apiBase}/><span>{p.username}<small>{p.status === 'online' ? 'Online' : 'Offline'}</small></span></div>; })}</div>}
+        {current.type === 'UNKNOWN' && <p>Danh sách trên chỉ gồm bạn và người gửi trong trang lịch sử đã tải. BE chưa có API thông tin hội thoại.</p>}
+      </aside>}
       <label className="message-search"><Search size={16}/><input value={search} onChange={e => setSearch(e.target.value)} aria-label="Tìm tin nhắn trên máy chủ" placeholder="Tìm toàn bộ tin nhắn trên máy chủ..."/><span>{searchLoading ? 'Đang tìm…' : search.trim() ? `${searchResults.length} kết quả` : ''}</span></label><ErrorBox error={searchError || historyErrors[active]}/>{[403, 404].includes(historyStatus[active]) && <div className="history-recovery"><button className="text-button" onClick={() => loadHistory(current)} disabled={loading[active]}><RefreshCw size={14}/>Thử lại</button><button className="text-button" onClick={() => hideConversation(current)}>Ẩn khỏi danh sách trên máy này</button><small>Chỉ ẩn lối tắt cục bộ, không xóa dữ liệu trên server.</small></div>}
       <section className="messages" ref={list} aria-label="Nội dung trò chuyện"><div className="history-controls">{!search.trim() && older[active] && <button disabled={loading[active]} onClick={() => loadHistory(current, Math.min(...displayed.filter(m => m.seq != null).map(m => m.seq)))}>Tải tin nhắn cũ hơn</button>}{loading[active] && !search.trim() && <span role="status">Đang tải lịch sử…</span>}{search.trim() && !searchLoading && <span role="status">Kết quả tìm kiếm từ backend · tối đa 50 tin mới nhất</span>}</div>{visibleMessages.map(m => { const own = m.sender_id === user.user_id; const p = sender(m.sender_id); const reply = m.reply_to || messages.find(item => item.message_id === m.reply_to_message_id); return <article key={m.message_id || m.client_message_id} data-message-id={m.message_id || undefined} className={`message-row ${own ? 'mine' : ''}`}>
-        {!own && <Avatar user={p} apiBase={config.apiBase}/>}<div className="message-body"><div className="sender-name">{own ? 'Bạn' : p.username}<span>{new Date(m.created_at).toLocaleDateString('vi-VN')} · {clock(m.created_at)}</span></div><div className="bubble">{m.reply_to_message_id && <blockquote>{reply?.content || 'Trả lời một tin nhắn trước đó'}</blockquote>}{m.content}</div><div className="live-message-actions">{m.message_id && <button title="Trả lời tin nhắn" aria-label={`Trả lời: ${m.content.slice(0, 40)}`} onClick={() => editDraft({ reply: m })}><Reply size={13}/>Trả lời</button>}{own && <span>{m.status === 'PENDING' ? 'Đang chờ BE…' : m.status === 'FAILED' ? 'Chưa xác nhận' : m.read_by?.length ? `Đã xem${m.read_by.length > 1 ? ` · ${m.read_by.length}` : ''}` : 'Chưa xem'}</span>}{own && m.status === 'FAILED' && <button disabled={connection !== 'connected' || !verified[active]} onClick={() => publish(m)}><RefreshCw size={12}/>Gửi lại</button>}</div>{m.error && <p className="message-error">{m.error}</p>}</div></article>; })}{!visibleMessages.length && !searchLoading && !searchError && (search.trim() ? <div className="empty-chat"><Search size={36}/><h3>Không tìm thấy tin nhắn</h3><p>Thử một từ khóa khác trong hội thoại này.</p></div> : !loading[active] && !historyErrors[active] && <div className="empty-chat"><MessageCircle size={36}/><h3>Bắt đầu câu chuyện</h3><p>Tin nhắn sẽ được lưu bởi backend của nhóm.</p></div>)}</section>
-      <div className="composer-area">{draft.reply && <div className="reply-preview"><Reply size={16}/><span>Đang trả lời: {draft.reply.content}</span><button className="icon-button" aria-label="Hủy trả lời" onClick={() => editDraft({ reply: null })}><X size={16}/></button></div>}<form className="composer" onSubmit={send}><textarea rows={2} maxLength={4000} aria-label="Nội dung tin nhắn" placeholder={`Nhắn tin tới ${name(current)}...`} value={draft.text} onChange={e => editDraft({ text: e.target.value })} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(e); } }}/><div className="composer-toolbar"><span className="muted">Enter để gửi · Shift + Enter xuống dòng</span><button className="send-button" disabled={!draft.text.trim() || connection !== 'connected' || !verified[active]}>Gửi tin nhắn<Send size={16}/></button></div></form><div className="composer-bottom">{connection !== 'connected' ? 'Đang ngoại tuyến. Bản nháp được giữ trong phiên này.' : 'Đã đồng bộ tin nhắn đã gửi và trạng thái đã xem.'}</div></div></> : <div className="live-welcome"><span className="brand-mark"><Radio size={32}/></span><h1>Chào {user.username}.</h1><p>Một cuộc trò chuyện mới đang chờ bạn.</p><button className="primary-button" onClick={() => setModal('new')}><Plus size={18}/>Bắt đầu trò chuyện</button><p className="muted">Chọn hội thoại bên trái hoặc mở bằng mã nhóm được chia sẻ.</p></div>}
+        {!own && <Avatar user={p} apiBase={config.apiBase}/>}<div className="message-body"><div className="sender-name">{own ? 'Bạn' : p.username}<span>{new Date(m.created_at).toLocaleDateString('vi-VN')} · {clock(m.created_at)}</span></div><div className="bubble">{m.reply_to_message_id && <blockquote>{reply?.content || 'Trả lời một tin nhắn trước đó'}</blockquote>}{m.content}</div><div className="live-message-actions">{m.message_id && <button title="Trả lời tin nhắn" aria-label={`Trả lời: ${m.content.slice(0, 40)}`} onClick={() => editDraft({ reply: m })}><Reply size={13}/>Trả lời</button>}{own && <span>{m.status === 'PENDING' ? 'Đang chờ BE…' : m.status === 'FAILED' ? 'Chưa xác nhận' : m.read_by?.length ? `Đã xem${m.read_by.length > 1 ? ` · ${m.read_by.length}` : ''}` : 'Chưa xem'}</span>}{own && m.status === 'FAILED' && <button disabled={connection !== 'connected' || !verified[active]} onClick={() => publish(m)}><RefreshCw size={12}/>Gửi lại</button>}</div>{m.error && <p className="message-error">{m.error}</p>}</div></article>; })}{!visibleMessages.length && !searchLoading && !searchError && (search.trim() ? <div className="empty-chat"><Search size={36}/><h3>Không tìm thấy tin nhắn</h3><p>Thử một từ khóa khác trong hội thoại này.</p></div> : !loading[active] && !historyErrors[active] && <div className="empty-chat"><MessageCircle size={36}/><h3>Bắt đầu câu chuyện</h3></div>)}</section>
+      {Object.keys(typingUsers[active] || {}).length > 0 && <div className="live-typing" role="status"><span className="typing-dots"><i/><i/><i/></span><span>{Object.values(typingUsers[active]).join(', ')} đang soạn tin nhắn</span></div>}
+      <div className="composer-area">{current.is_archived && <p className="muted">Nhóm đã đóng — lịch sử chỉ đọc.</p>}{draft.reply && <div className="reply-preview"><Reply size={16}/><span>Đang trả lời: {draft.reply.content}</span><button className="icon-button" aria-label="Hủy trả lời" onClick={() => editDraft({ reply: null })}><X size={16}/></button></div>}<form className="composer" onSubmit={send}><textarea rows={2} maxLength={4000} aria-label="Nội dung tin nhắn" placeholder={`Nhắn tin tới ${name(current)}...`} value={draft.text} onChange={e => updateDraftText(e.target.value)} onBlur={() => stopTyping()} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(e); } }} disabled={current.is_archived}/><div className="composer-toolbar"><span className="muted">Enter để gửi · Shift + Enter xuống dòng</span><button className="send-button" disabled={current.is_archived || !draft.text.trim() || connection !== 'connected' || !verified[active]}>Gửi tin nhắn<Send size={16}/></button></div></form><div className="composer-bottom">{connection !== 'connected' ? 'Đang ngoại tuyến. Bản nháp được giữ trong phiên này.' : 'Đã đồng bộ tin nhắn đã gửi và trạng thái đã xem.'}</div></div></> : <div className="live-welcome"><span className="brand-mark"><Radio size={32}/></span><h1>Chào {user.username}.</h1><p>Một cuộc trò chuyện mới đang chờ bạn.</p><button className="primary-button" onClick={() => setModal('new')}><Plus size={18}/>Bắt đầu trò chuyện</button><p className="muted">Chọn hội thoại bên trái hoặc mở bằng mã nhóm được chia sẻ.</p></div>}
     </main>
     {hiddenConversation && <div className="undo-notice" role="status"><span>Đã ẩn hội thoại trên máy này.</span><button onClick={undoHide}>Hoàn tác</button><button className="icon-button" aria-label="Đóng thông báo ẩn hội thoại" onClick={() => setHiddenConversation(null)}><X size={14}/></button></div>}
+    {toast && <div className={`live-toast live-toast-${toast.type}`} role={toast.type === 'error' ? 'alert' : 'status'}><span className="live-toast-icon">{toast.type === 'success' ? <Check size={17}/> : toast.type === 'error' ? <X size={17}/> : <Info size={17}/>}</span><span>{toast.message}</span><button className="icon-button" aria-label="Đóng thông báo" onClick={() => setToast(null)}><X size={15}/></button></div>}
     {modal === 'new' && <NewConversation api={api} config={config} user={user} close={() => setModal(null)} onCreated={addConversation}/>}
     {modal === 'open' && <OpenConversation api={api} user={user} close={() => setModal(null)} onOpened={(c, history) => { merge(history); addConversation(c); }}/>}
     {modal === 'profile' && <Profile api={api} config={config} user={user} close={() => setModal(null)} onUpdate={updated => { setUser(updated); setConversations(prev => prev.map(c => ({ ...c, members: c.members.map(member => member.user_id === updated.user_id ? updated : member) }))); }}/>}
   </div>;
 }
+function GroupDetailsPanel({ groupId, user, api, apiBase, onChanged, onToast, onLeave }) {
+  const [group, setGroup] = useState(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function refresh() {
+    const result = await api.groupDetails(groupId);
+    setGroup(result);
+    setName(result.name || '');
+    setDescription(result.description || '');
+    return result;
+  }
+  useEffect(() => {
+    let active = true;
+    api.groupDetails(groupId).then(result => {
+      if (!active) return;
+      setGroup(result);
+      setName(result.name || '');
+      setDescription(result.description || '');
+    }).catch(requestError => { if (active) setError(requestError.message); });
+    return () => { active = false; };
+  }, [api, groupId]);
+  async function perform(action, confirmation = '', afterAction = null, successMessage = '') {
+    if (confirmation && !window.confirm(confirmation)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await action();
+      if (afterAction) {
+        afterAction();
+        return;
+      }
+      await refresh();
+      await onChanged();
+      if (successMessage) onToast(successMessage);
+    } catch (requestError) {
+      setError(requestError.message);
+      if (requestError.status === 412) {
+        try { await refresh(); } catch (refreshError) { setError(refreshError.message); }
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!group) return <div><ErrorBox error={error}/><p className="muted">Đang tải thông tin nhóm…</p></div>;
+  const permissions = group.permissions || {};
+  const activeMembers = group.members || [];
+  const pendingInvitations = group.pending_invitations || [];
+  return <section className="group-management">
+    <ErrorBox error={error}/>
+    {group.is_archived && <p className="muted">Nhóm đã đóng · chỉ đọc.</p>}
+    {permissions.can_edit ? <form onSubmit={event => { event.preventDefault(); perform(() => api.updateGroup(groupId, group.version, { name: name.trim(), description })); }}>
+      <label className="form-label">Tên nhóm<input maxLength={255} value={name} onChange={event => setName(event.target.value)} required/></label>
+      <label className="form-label">Mô tả<textarea maxLength={4000} rows={2} value={description} onChange={event => setDescription(event.target.value)}/></label>
+      <button className="text-button" disabled={busy || !name.trim()}>Lưu thông tin nhóm</button>
+    </form> : <><strong>{group.name || 'Nhóm chat'}</strong>{group.description && <p>{group.description}</p>}</>}
+    <div className="group-section-heading"><h3>Thành viên</h3><span>{activeMembers.length}</span></div>
+    <div className="group-member-list">{activeMembers.map(member => <div className="group-member-card" key={member.user_id}>
+      <Avatar user={member} apiBase={apiBase}/>
+      <span>{member.username}<small>{member.role === 'OWNER' ? 'Chủ nhóm' : member.role === 'ADMIN' ? 'Quản trị viên' : 'Thành viên'}</small></span>
+      {permissions.can_manage_roles && member.role !== 'OWNER' && <select aria-label={`Vai trò ${member.username}`} disabled={busy} value={member.role} onChange={event => perform(() => api.setGroupMemberRole(groupId, member.user_id, group.version, event.target.value))}><option value="MEMBER">Thành viên</option><option value="ADMIN">Quản trị viên</option></select>}
+      {permissions.can_transfer_ownership && member.role !== 'OWNER' && <button className="text-button" disabled={busy} onClick={() => perform(() => api.transferGroupOwnership(groupId, group.version, member.user_id), `Chuyển quyền chủ nhóm cho ${member.username}?`)}>Chuyển chủ</button>}
+      {permissions.can_remove_members && member.user_id !== user.user_id && member.role !== 'OWNER' && (group.role === 'OWNER' || member.role === 'MEMBER') && <button className="text-button" disabled={busy} onClick={() => perform(() => api.removeGroupMember(groupId, member.user_id, group.version), `Xóa ${member.username} khỏi nhóm?`)}>Xóa</button>}
+    </div>)}</div>
+    {!!pendingInvitations.length && <section className="pending-group-invitations"><div className="group-section-heading"><h3>Lời mời đang chờ</h3><span>{pendingInvitations.length}</span></div><p>Những người này sẽ thành viên sau khi chấp nhận lời mời.</p><div className="group-member-list">{pendingInvitations.map(person => <div className="group-member-card pending" key={person.user_id}><Avatar user={person} apiBase={apiBase}/><span>{person.username}<small>Đang chờ xác nhận</small></span></div>)}</div></section>}
+    {permissions.can_invite && <div className="group-invite"><h3>Mời thành viên</h3><UserSearch api={api} apiBase={apiBase} exclude={user.user_id} excludeIds={activeMembers.map(member => member.user_id)} actionLabel={busy ? 'Đang gửi…' : 'Mời vào nhóm'} onSelect={person => perform(() => api.inviteRoom(user.user_id, person.user_id, groupId, group.version), '', null, `Đã gửi lời mời tham gia nhóm đến ${person.username}.`)}/></div>}
+    <div className="group-actions">
+      {permissions.can_leave && <button disabled={busy} onClick={() => perform(() => api.leaveGroup(groupId, group.version), 'Rời khỏi nhóm này?', onLeave)}>Rời nhóm</button>}
+      {permissions.can_archive && <button disabled={busy} onClick={() => perform(() => api.archiveGroup(groupId, group.version), 'Đóng nhóm? Thành viên sẽ chỉ xem được lịch sử.')}>Đóng nhóm</button>}
+    </div>
+  </section>;
+}
+
 function NewConversation({ api, config, user, close, onCreated }) {
   const [type, setType] = useState('PRIVATE'); const [name, setName] = useState(''); const [selected, setSelected] = useState([]); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  async function submit(event) { event.preventDefault(); setBusy(true); setError(''); try { onCreated(await api.createConversation({ user_id: user.user_id, type, ...(type === 'PRIVATE' ? { username: selected[0].username } : { name: name.trim(), usernames: selected.map(p => p.username) }) })); } catch (error) { setError(error.message); } finally { setBusy(false); } }
-  return <Modal title="Cuộc trò chuyện mới" close={close}><form onSubmit={submit}><div className="modal-tabs">{[['PRIVATE','Cá nhân'],['GROUP','Tạo nhóm']].map(([value,label]) => <button key={value} type="button" className={type === value ? 'selected' : ''} onClick={() => { setType(value); setSelected([]); }}>{label}</button>)}</div>{type === 'GROUP' && <label className="form-label">Tên nhóm<input required maxLength={255} value={name} onChange={e => setName(e.target.value)} placeholder="Tên nhóm của bạn"/></label>}<UserSearch api={api} apiBase={config.apiBase} exclude={user.user_id} selected={selected.map(p => p.user_id)} onSelect={p => setSelected(prev => type === 'PRIVATE' ? [p] : prev.some(item => item.user_id === p.user_id) ? prev.filter(item => item.user_id !== p.user_id) : [...prev, p])}/><div className="selected-users">{selected.map(p => <button type="button" key={p.user_id} onClick={() => setSelected(prev => prev.filter(item => item.user_id !== p.user_id))}>{p.username}<X size={12}/></button>)}</div><ErrorBox error={error}/><button className="primary-button" disabled={busy || !selected.length || type === 'GROUP' && !name.trim()}>{busy ? 'Đang tạo…' : 'Bắt đầu trò chuyện'}</button></form></Modal>;
+  async function submit(event) { event.preventDefault(); setBusy(true); setError(''); try { const conversation = await api.createConversation({ type, ...(type === 'PRIVATE' ? { username: selected[0].username } : { name: name.trim(), usernames: selected.map(p => p.username) }) }); onCreated(conversation, type === 'GROUP' ? selected.map(person => person.username) : []); } catch (error) { setError(error.message); } finally { setBusy(false); } }
+  return <Modal title="Cuộc trò chuyện mới" close={close}><form onSubmit={submit}><div className="modal-tabs">{[['PRIVATE','Cá nhân'],['GROUP','Tạo nhóm']].map(([value,label]) => <button key={value} type="button" className={type === value ? 'selected' : ''} onClick={() => { setType(value); setSelected([]); }}>{label}</button>)}</div>{type === 'GROUP' && <label className="form-label">Tên nhóm<input required maxLength={255} value={name} onChange={e => setName(e.target.value)} placeholder="Tên nhóm của bạn"/></label>}{type === 'GROUP' && <p className="muted">Người được chọn sẽ nhận lời mời và trở thành thành viên sau khi chấp nhận.</p>}<UserSearch api={api} apiBase={config.apiBase} exclude={user.user_id} selected={selected.map(p => p.user_id)} onSelect={p => setSelected(prev => type === 'PRIVATE' ? [p] : prev.some(item => item.user_id === p.user_id) ? prev.filter(item => item.user_id !== p.user_id) : [...prev, p])}/><div className="selected-users">{selected.map(p => <button type="button" key={p.user_id} onClick={() => setSelected(prev => prev.filter(item => item.user_id !== p.user_id))}>{p.username}<X size={12}/></button>)}</div><ErrorBox error={error}/><button className="primary-button" disabled={busy || (type === 'PRIVATE' && !selected.length) || (type === 'GROUP' && !name.trim())}>{busy ? 'Đang tạo…' : type === 'GROUP' ? 'Tạo nhóm' : 'Bắt đầu trò chuyện'}</button></form></Modal>;
 }
 function OpenConversation({ api, user, close, onOpened }) {
   const [id, setId] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
@@ -634,7 +912,13 @@ function InvitationsPage({ api, config, user, onBack, onChanged, onRoomAccepted 
     setSent(result.sent);
     setRoomIncoming(result.room_incoming);
     setRoomSent(result.room_sent);
-    const groupConversations = catalog.conversations.filter(conversation => conversation.type === 'GROUP');
+    const groupConversations = catalog.conversations.filter(conversation =>
+      conversation.type === 'GROUP'
+      && !conversation.is_archived
+      && (conversation.owner_id === user.user_id
+        || conversation.members.some(member =>
+          member.user_id === user.user_id && member.role === 'ADMIN')),
+    );
     setGroups(groupConversations);
     setSelectedGroupId(current => groupConversations.some(group => group.conversation_id === current)
       ? current
@@ -651,7 +935,7 @@ function InvitationsPage({ api, config, user, onBack, onChanged, onRoomAccepted 
     setNotice('');
     try {
       if (room) {
-        await api.respondRoom(invitation.invitation_id, user.user_id, status);
+        await api.respondRoom(invitation.invitation_id, user.user_id, status, invitation.conversation.version);
       } else {
         await api.respond(invitation.invitation_id, user.user_id, status);
       }
@@ -673,7 +957,7 @@ function InvitationsPage({ api, config, user, onBack, onChanged, onRoomAccepted 
     setError('');
     setNotice('');
     try {
-      await api.inviteRoom(user.user_id, person.user_id, selectedGroup.conversation_id);
+      await api.inviteRoom(user.user_id, person.user_id, selectedGroup.conversation_id, selectedGroup.version);
       const result = await refresh();
       setNotice(`Đã mời ${person.username} vào ${selectedGroup.name || 'nhóm'}.`);
       onChanged(result);
@@ -681,6 +965,23 @@ function InvitationsPage({ api, config, user, onBack, onChanged, onRoomAccepted 
       setError(error.message);
     } finally {
       setBusyId(null);
+    }
+    async function cancelRoomInvitation(invitation) {
+      setBusyId(invitation.invitation_id);
+      setError('');
+      setNotice('');
+      try {
+        await api.cancelRoomInvitation(
+          invitation.invitation_id,
+          invitation.conversation.version,
+        );
+        await refresh();
+        setNotice('Đã hủy lời mời vào nhóm.');
+      } catch (requestError) {
+        setError(requestError.message);
+      } finally {
+        setBusyId(null);
+      }
     }
   }
   const matches = invitation => {
@@ -696,7 +997,7 @@ function InvitationsPage({ api, config, user, onBack, onChanged, onRoomAccepted 
       <time>{new Date(invitation.send_time).toLocaleDateString('vi-VN')}</time>
       {!outgoing
         ? <div className="invitation-actions"><button className="network-primary" disabled={busyId === invitation.invitation_id} onClick={() => respond(invitation, 'ACCEPT', room)}>{busyId === invitation.invitation_id ? 'Đang xử lý…' : 'Chấp nhận'}</button><button disabled={busyId === invitation.invitation_id} onClick={() => respond(invitation, 'REJECT', room)}>Từ chối</button></div>
-        : <span className="invitation-pending"><i className="status-dot"/>Đang chờ</span>}
+        : <>{room ? <button disabled={busyId === invitation.invitation_id} onClick={() => cancelRoomInvitation(invitation)}>Hủy lời mời</button> : <span className="invitation-pending"><i className="status-dot"/>Đang chờ</span>}</>}
     </article>;
   }
   const activeIncoming = (tab === 'friends' ? incoming : roomIncoming).filter(matches);

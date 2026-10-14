@@ -30,7 +30,11 @@ class RoomInvitationRepository:
 
     def list_for_user(self, user):
         pending = RoomInvitation.objects.filter(
-            status=RoomInvitation.InvitationStatus.PENDING
+            status=RoomInvitation.InvitationStatus.PENDING,
+            user__auth_user__isnull=False,
+            user__auth_user__is_active=True,
+            sender__auth_user__isnull=False,
+            sender__auth_user__is_active=True,
         ).select_related("conversation", "sender", "user")
         return {
             "room_incoming": pending.filter(user=user).order_by("-send_time"),
